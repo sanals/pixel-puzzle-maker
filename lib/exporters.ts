@@ -147,12 +147,17 @@ export async function assembleExportAssets(
     if (indices.length === 0) continue
 
     const tileInstances: THREE.Matrix4[] = []
-    for (const i of indices) {
+    for (let idx = 0; idx < indices.length; idx++) {
+      const i = indices[idx]
       const p = layout.placements[i]
       const m = new THREE.Matrix4()
       if (options.packTilesAtOrigin) {
         // Simple linear packing for standalone tile print if requested
-        m.makeTranslation((i % 20) * layout.pitch, 0, Math.floor(i / 20) * layout.pitch)
+        const maxPerPlate = 30 * 30
+        const localIdx = idx % maxPerPlate
+        const col = localIdx % 30
+        const row = Math.floor(localIdx / 30)
+        m.makeTranslation(col * layout.pitch, 0, row * layout.pitch)
       } else {
         const offset = -7.8 / 2
         m.makeTranslation(p.worldX + offset, floorY, p.worldZ + offset)
@@ -203,8 +208,8 @@ function bakeInstances(exp: InstancedExport): BakedMesh {
     g.applyMatrix4(matrix)
     const p = g.getAttribute("position")
     for (let i = 0; i < p.count; i++) {
-      // Y-up -> Z-up: (x, y, z) => (x, z, y)
-      baked.positions.push(p.getX(i), p.getZ(i), p.getY(i))
+      // Y-up -> Z-up: +90 rot X => (x, -z, y)
+      baked.positions.push(p.getX(i), -p.getZ(i), p.getY(i))
     }
   }
   return baked
@@ -289,7 +294,7 @@ export function build3MF(assets: ExportAssets): Promise<Blob> {
     .join("\n")
 
   const objects: string[] = []
-  const buildItems: string[] = []
+  const components: string[] = []
   
   let nextObjectId = 2 // 1 is reserved for basematerials
 
@@ -320,12 +325,10 @@ export function build3MF(assets: ExportAssets): Promise<Blob> {
       `    </object>`
     )
 
-    // Instantiate it multiple times in the build section
+    // Instantiate it multiple times as components of a master object
     for (const m of grp.instances) {
       const e = m.elements
-      // m is column-major: 0,1,2,3 is col1. 4,5,6,7 is col2. 12,13,14 is translation (x,y,z).
       // Transform Y-up matrix to Z-up 3MF matrix string.
-      // Y-up: translation = [x, y, z]. Z-up translation = [x, z, y]
       const tx = e[12] + ox
       const ty = e[13] + oy
       const tz = e[14] + oz
@@ -334,9 +337,21 @@ export function build3MF(assets: ExportAssets): Promise<Blob> {
       const item_ty = -tz
       const item_tz = ty
       
-      buildItems.push(`    <item objectid="${templateId}" transform="1 0 0 0 1 0 0 0 1 ${fmt(item_tx)} ${fmt(item_ty)} ${fmt(item_tz)}"/>`)
+      components.push(`        <component objectid="${templateId}" transform="1 0 0 0 1 0 0 0 1 ${fmt(item_tx)} ${fmt(item_ty)} ${fmt(item_tz)}"/>`)
     }
   })
+
+  // Group everything passed to this function into a single monolithic multi-part object
+  const masterId = nextObjectId++
+  objects.push(
+    `    <object id="${masterId}" type="model">\n` +
+    `      <components>\n` +
+    components.join("\n") +
+    `\n      </components>\n` +
+    `    </object>`
+  )
+
+  const buildItems = [`    <item objectid="${masterId}"/>`]
 
   const modelChunks: string[] = []
   modelChunks.push(
@@ -399,7 +414,7 @@ export function buildStlZip(assets: ExportAssets): Promise<Blob> {
   const zip = new JSZip()
   const trayFolder = zip.folder("trays")!
   if (assets.trays.length === 1) {
-    zip.file("tray.stl", writeBinarySTL([bakeInstances(assets.trays[0])]))
+    trayFolder.file("tray.stl", writeBinarySTL([bakeInstances(assets.trays[0])]))
   } else {
     for (const tray of assets.trays) {
       trayFolder.file(`${tray.name}.stl`, writeBinarySTL([bakeInstances(tray)]))
@@ -418,6 +433,114 @@ export function buildStlZip(assets: ExportAssets): Promise<Blob> {
     "tiles/   : color-sorted tile batches\n" +
     "connector-pegs.stl : bow-tie keys bridging split boards\n\n"
   zip.file("README.txt", readme)
+  return zip.generateAsync({ type: "blob" })
+}
+
+/** Write a 3MF containing exactly one solid monolithic mesh from baked geometry. */
+async function buildBaked3MF(meshes: BakedMesh[]): Promise<Blob> {
+  const verts: string[] = []
+  const tris: string[] = []
+  let vertIndex = 0
+
+  for (const m of meshes) {
+    const p = m.positions
+    for (let i = 0; i < p.length; i += 9) {
+      verts.push(`<vertex x="${fmt(p[i])}" y="${fmt(p[i+1])}" z="${fmt(p[i+2])}"/>`)
+      verts.push(`<vertex x="${fmt(p[i+3])}" y="${fmt(p[i+4])}" z="${fmt(p[i+5])}"/>`)
+      verts.push(`<vertex x="${fmt(p[i+6])}" y="${fmt(p[i+7])}" z="${fmt(p[i+8])}"/>`)
+      tris.push(`<triangle v1="${vertIndex}" v2="${vertIndex+1}" v3="${vertIndex+2}" pid="1" p1="0"/>`)
+      vertIndex += 3
+    }
+  }
+
+  const modelXml = `<?xml version="1.0" encoding="UTF-8"?>
+<model unit="millimeter" xml:lang="en-US"
+  xmlns="http://schemas.microsoft.com/3dmanufacturing/core/2015/02"
+  xmlns:m="http://schemas.microsoft.com/3dmanufacturing/material/2015/02"
+  xmlns:slic3rpe="http://schemas.slic3r.org/3mf/2017/06">
+  <metadata name="Application">Pixel Puzzle Maker</metadata>
+  <metadata name="slic3rpe:3mf_version">2</metadata>
+  <resources>
+    <m:colorgroup id="1">
+      <m:color color="${meshes[0] ? hexToTriplet(meshes[0].color) : "#FFFFFFff"}"/>
+    </m:colorgroup>
+    <object id="2" type="model">
+      <mesh>
+        <vertices>${verts.join("")}</vertices>
+        <triangles>${tris.join("")}</triangles>
+      </mesh>
+    </object>
+  </resources>
+  <build>
+    <item objectid="2"/>
+  </build>
+</model>
+`
+  const zip = new JSZip()
+  const contentTypes =
+    `<?xml version="1.0" encoding="UTF-8"?>\n` +
+    `<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">\n` +
+    `  <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>\n` +
+    `  <Default Extension="model" ContentType="application/vnd.ms-package.3dmanufacturing-3dmodel+xml"/>\n` +
+    `</Types>\n`
+
+  const rels =
+    `<?xml version="1.0" encoding="UTF-8"?>\n` +
+    `<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">\n` +
+    `  <Relationship Target="/3D/3dmodel.model" Id="rel0" Type="http://schemas.microsoft.com/3dmanufacturing/2013/01/3dmodel"/>\n` +
+    `</Relationships>\n`
+
+  zip.file("[Content_Types].xml", contentTypes)
+  zip.folder("_rels")!.file(".rels", rels)
+  zip.folder("3D")!.file("3dmodel.model", modelXml)
+  return zip.generateAsync({ type: "blob", mimeType: "model/3mf" })
+}
+
+/** Bundle 3MF files into a ZIP (ideal for printing color-by-color separated plates). */
+export async function build3MFZip(assets: ExportAssets): Promise<Blob> {
+  const zip = new JSZip()
+  
+  // Base trays
+  if (assets.trays.length === 1) {
+    const meshes = [bakeInstances(assets.trays[0])]
+    if (assets.texts[0]) meshes.push(bakeInstances(assets.texts[0]))
+    const base3mf = await buildBaked3MF(meshes)
+    zip.file("1_Plate_Board.3mf", base3mf)
+  } else {
+    for (let i = 0; i < assets.trays.length; i++) {
+      const meshes = [bakeInstances(assets.trays[i])]
+      if (assets.texts[i]) meshes.push(bakeInstances(assets.texts[i]))
+      const base3mf = await buildBaked3MF(meshes)
+      zip.file(`1_Plate_Board_${i + 1}.3mf`, base3mf)
+    }
+  }
+  
+  // Tiles separated by color
+  for (let i = 0; i < assets.tiles.length; i++) {
+    const t = assets.tiles[i]
+    const maxPerPlate = 30 * 30
+    
+    if (t.instances.length <= maxPerPlate) {
+      const t3mf = await buildBaked3MF([bakeInstances(t)])
+      zip.file(`2_Plate_Tiles_${t.color.replace("#", "")}.3mf`, t3mf)
+    } else {
+      let chunkIdx = 1
+      for (let j = 0; j < t.instances.length; j += maxPerPlate) {
+        const chunkInstances = t.instances.slice(j, j + maxPerPlate)
+        const chunkExport: InstancedExport = { ...t, instances: chunkInstances }
+        const t3mf = await buildBaked3MF([bakeInstances(chunkExport)])
+        zip.file(`2_Plate_Tiles_${t.color.replace("#", "")}_Part${chunkIdx}.3mf`, t3mf)
+        chunkIdx++
+      }
+    }
+  }
+  
+  // Connectors
+  if (assets.connectors) {
+    const c3mf = await buildBaked3MF([bakeInstances(assets.connectors)])
+    zip.file("3_Plate_Connectors.3mf", c3mf)
+  }
+  
   return zip.generateAsync({ type: "blob" })
 }
 

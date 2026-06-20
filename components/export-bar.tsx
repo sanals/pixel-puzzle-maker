@@ -8,7 +8,7 @@ import { usePuzzle } from "@/components/puzzle-context"
 import {
   assembleExportAssets,
   build3MF,
-  buildStlZip,
+  build3MFZip,
   downloadBlob,
 } from "@/lib/exporters"
 
@@ -40,20 +40,20 @@ export function ExportBar() {
   async function exportZip() {
     if (disabled) return
     setBusy("zip")
-    const id = toast.loading("Packaging STL archive…")
+    const id = toast.loading("Packaging separated 3MF plates…")
     try {
       const assets = await assembleExportAssets(layout!, matrix!.palette, split!, config.embossing, { packTilesAtOrigin: true })
-      const blob = await buildStlZip(assets)
-      downloadBlob(blob, "pixel-puzzle-stl.zip")
-      toast.success("Exported pixel-puzzle-stl.zip", {
+      const blob = await build3MFZip(assets)
+      downloadBlob(blob, "pixel-puzzle-separated.zip")
+      toast.success("Exported pixel-puzzle-separated.zip", {
         id,
         description: split!.needsSplit
-          ? `${split!.subBoards.length} sub-boards + connector keys bundled.`
-          : "Tray + color-sorted tiles bundled.",
+          ? `${split!.subBoards.length} boards + color tiles separated into .3mf files.`
+          : "Tray + color-sorted tiles separated into .3mf files.",
       })
     } catch (err) {
       console.log("[v0] zip export error:", err)
-      toast.error("STL export failed", { id })
+      toast.error("Separated 3MF export failed", { id })
     } finally {
       setBusy(null)
     }
@@ -76,7 +76,7 @@ export function ExportBar() {
         onClick={exportZip}
       >
         <Package className="size-4" aria-hidden="true" />
-        {busy === "zip" ? "Packaging…" : "Export Monolithic STL Zip"}
+        {busy === "zip" ? "Packaging…" : "Export Separated Plates (.zip)"}
       </Button>
       {split?.needsSplit && (
         <p className="flex items-start gap-1.5 px-1 text-xs text-muted-foreground">
