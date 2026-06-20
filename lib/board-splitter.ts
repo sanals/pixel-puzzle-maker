@@ -26,7 +26,8 @@ export interface SplitPlan {
   gridCols: number
   gridRows: number
   subBoards: SubBoard[]
-  /** Internal seams that receive snap-fit connectors. */
+  /** Pre-computed world coordinates for snap-fit connectors along seams. */
+  connectorPositions: { x: number; z: number; rotated: boolean }[]
   connectorCount: number
   reason: string
 }
@@ -100,10 +101,38 @@ export function planBoardSplit(layout: GridLayout, config: PuzzleConfig): SplitP
     }
   }
 
-  // One connector per shared internal edge between adjacent sub-boards.
-  const horizontalSeams = (colRanges.length - 1) * rowRanges.length
-  const verticalSeams = colRanges.length * (rowRanges.length - 1)
-  const connectorCount = needsSplit ? (horizontalSeams + verticalSeams) * 2 : 0
+  const connectorPositions: { x: number; z: number; rotated: boolean }[] = []
+  if (needsSplit) {
+    const halfX = (layout.boardWidth - layout.pitch) / 2
+    const halfZ = (layout.boardDepth - layout.pitch) / 2
+
+    // Vertical seams (connect left/right sub-boards)
+    for (let c = 1; c < colRanges.length; c++) {
+      const colIdx = colRanges[c][0]
+      const worldX = colIdx * layout.pitch - halfX - layout.pitch / 2
+      for (let r = 0; r < rowRanges.length; r++) {
+        const rowMid = (rowRanges[r][0] + rowRanges[r][1]) / 2
+        const worldZ = rowMid * layout.pitch - halfZ
+        // Place two connectors per seam for stability
+        connectorPositions.push({ x: worldX, z: worldZ - layout.pitch, rotated: false })
+        connectorPositions.push({ x: worldX, z: worldZ + layout.pitch, rotated: false })
+      }
+    }
+
+    // Horizontal seams (connect top/bottom sub-boards)
+    for (let r = 1; r < rowRanges.length; r++) {
+      const rowIdx = rowRanges[r][0]
+      const worldZ = rowIdx * layout.pitch - halfZ - layout.pitch / 2
+      for (let c = 0; c < colRanges.length; c++) {
+        const colMid = (colRanges[c][0] + colRanges[c][1]) / 2
+        const worldX = colMid * layout.pitch - halfX
+        connectorPositions.push({ x: worldX - layout.pitch, z: worldZ, rotated: true })
+        connectorPositions.push({ x: worldX + layout.pitch, z: worldZ, rotated: true })
+      }
+    }
+  }
+
+  const connectorCount = connectorPositions.length
 
   return {
     needsSplit,
@@ -111,6 +140,7 @@ export function planBoardSplit(layout: GridLayout, config: PuzzleConfig): SplitP
     gridRows: rowRanges.length,
     subBoards,
     connectorCount,
+    connectorPositions,
     reason: needsSplit
       ? `Footprint ${Math.round(layout.boardWidth)}×${Math.round(
           layout.boardDepth,

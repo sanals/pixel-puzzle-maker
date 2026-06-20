@@ -4,37 +4,27 @@ import JSZip from "jszip"
 import * as THREE from "three"
 import type { SplitPlan } from "./board-splitter"
 import { createConnectorPegGeometry } from "./board-splitter"
-import { createPocketRingGeometry, createTileGeometry } from "./geometry-generators"
+import { createTrayGeometry, createTileGeometry, getFont } from "./geometry-generators"
 import type { GridLayout } from "./grid-engine"
-import type { PaletteColor } from "./types"
+import type { EmbossingStyle, PaletteColor } from "./types"
+import { Brush, Evaluator, SUBTRACTION, ADDITION } from "three-bvh-csg"
+import { mergeBufferGeometries, TextGeometry } from "three-stdlib"
 
 const TRAY_COLOR = "#cbd5e1"
 
-/** A baked, world-space triangle soup tagged with a color + name. */
+/** A template mesh with a list of instance transforms. */
+export interface InstancedExport {
+  name: string
+  color: string
+  geometry: THREE.BufferGeometry
+  instances: THREE.Matrix4[]
+}
+
+/** Legacy baked mesh format for ZIP STL generation */
 interface BakedMesh {
   name: string
   color: string
-  positions: number[] // flat xyz, Z-up convention
-}
-
-/** Append a geometry's triangles to a baked mesh, applying a transform.
- *  Converts the engine's Y-up space into a print-friendly Z-up space. */
-function bake(geo: THREE.BufferGeometry, matrix: THREE.Matrix4, target: BakedMesh): void {
-  const g = geo.index ? geo.toNonIndexed() : geo.clone()
-  g.applyMatrix4(matrix)
-  const pos = g.getAttribute("position")
-  for (let i = 0; i < pos.count; i++) {
-    const x = pos.getX(i)
-    const y = pos.getY(i)
-    const z = pos.getZ(i)
-    // Y-up -> Z-up: (x, y, z) => (x, z, y)
-    target.positions.push(x, z, y)
-  }
-  g.dispose()
-}
-
-function newMesh(name: string, color: string): BakedMesh {
-  return { name, color, positions: [] }
+  positions: number[] 
 }
 
 /** Bounds of a subset of placements (cells within a sub-board range). */
@@ -60,93 +50,164 @@ function subBoardBounds(
 }
 
 export interface ExportAssets {
-  /** Tray sub-boards (one mesh each). */
-  trays: BakedMesh[]
-  /** Tiles grouped per palette color. */
-  tiles: BakedMesh[]
-  /** Optional connector pegs mesh. */
-  connectors: BakedMesh | null
+  trays: InstancedExport[]
+  tiles: InstancedExport[]
+  connectors: InstancedExport | null
+  texts: InstancedExport[]
 }
 
-/** Build all baked geometry for export, honoring any board split plan. */
-export function assembleExportAssets(
+import { loadMasterAssets } from "./geometry-generators"
+
+/** Build all instanced geometry for export. */
+export async function assembleExportAssets(
   layout: GridLayout,
   palette: PaletteColor[],
   split: SplitPlan,
-): ExportAssets {
-  const ringGeo = createPocketRingGeometry(
-    layout.shape,
-    layout.pitch,
-    layout.tileSize,
-    layout.pocketDepth,
-  )
-  const tileGeo = createTileGeometry(layout.shape, layout.tileSize, layout.tileHeight)
+  embossing: EmbossingStyle,
+  options: { packTilesAtOrigin?: boolean } = {}
+): Promise<ExportAssets> {
   const floorY = layout.baseHeight - layout.pocketDepth
   const tmp = new THREE.Matrix4()
+  const font = await getFont()
+  const masterAssets = await loadMasterAssets()
 
-  // --- Trays (per sub-board, or one if not split) ---
-  const trays: BakedMesh[] = []
-  for (const sb of split.subBoards) {
-    const { indices, minX, maxX, minZ, maxZ } = subBoardBounds(layout, sb)
-    if (indices.length === 0) continue
-    const mesh = newMesh(sb.id, TRAY_COLOR)
+  const trays: InstancedExport[] = []
+  const texts: InstancedExport[] = []
 
-    const w = maxX - minX + layout.pitch
-    const d = maxZ - minZ + layout.pitch
-    const cx = (minX + maxX) / 2
-    const cz = (minZ + maxZ) / 2
+  // --- Trays ---
+  // The master tray is exactly 224x224mm. 
+  const TRAY_SIZE = 224.0
+  const numBoardsX = Math.ceil(layout.boardWidth / TRAY_SIZE)
+  const numBoardsZ = Math.ceil(layout.boardDepth / TRAY_SIZE)
+  
+  const trayInstances: THREE.Matrix4[] = []
+  for (let x = 0; x < numBoardsX; x++) {
+    for (let z = 0; z < numBoardsZ; z++) {
+      const totalW = numBoardsX * TRAY_SIZE
+      const totalD = numBoardsZ * TRAY_SIZE
+      const px = -totalW / 2 + x * TRAY_SIZE
+      const pz = -totalD / 2 + z * TRAY_SIZE
+      const m = new THREE.Matrix4()
+      m.makeTranslation(px, 0, pz)
+      trayInstances.push(m)
+    }
+  }
+  trays.push({
+    name: "Board",
+    color: TRAY_COLOR,
+    geometry: masterAssets.base,
+    instances: trayInstances
+  })
+
+  // --- Text Indicators (optional) ---
+  if (embossing !== "none") {
+    const textDepth = 0.4
+    const fontSize = layout.tileSize * 0.4
     const floorThickness = layout.baseHeight - layout.pocketDepth
-    const baseGeo = new THREE.BoxGeometry(w, floorThickness, d)
-    tmp.makeTranslation(cx, floorThickness / 2, cz)
-    bake(baseGeo, tmp, mesh)
-    baseGeo.dispose()
+    const ty = embossing === "raised" ? floorThickness : floorThickness - textDepth + 0.05
 
+    for (const [colorIndex, pal] of palette.entries()) {
+      if (!pal.label) continue
+      const textGeo = new TextGeometry(pal.label, {
+        font, size: fontSize, height: textDepth, curveSegments: 2, bevelEnabled: false
+      })
+      textGeo.computeBoundingBox()
+      const tbox = textGeo.boundingBox!
+      const tx = -(tbox.max.x - tbox.min.x) / 2
+      const tz = -(tbox.max.y - tbox.min.y) / 2
+      textGeo.rotateX(-Math.PI / 2)
+
+      const indices = layout.placements
+        .map((p, i) => (p.colorIndex === colorIndex ? i : -1))
+        .filter((i) => i !== -1)
+      
+      const textInstances: THREE.Matrix4[] = []
+      for (const i of indices) {
+        const p = layout.placements[i]
+        const m = new THREE.Matrix4()
+        m.makeTranslation(p.worldX + tx, ty, p.worldZ + tz)
+        textInstances.push(m)
+      }
+
+      texts.push({
+        name: `Text_${pal.label}`,
+        color: "#ffffff",
+        geometry: textGeo,
+        instances: textInstances
+      })
+    }
+  }
+
+  // --- Tiles ---
+  const tiles: InstancedExport[] = []
+  for (const [colorIndex, pal] of palette.entries()) {
+    const indices = layout.placements
+      .map((p, i) => (p.colorIndex === colorIndex ? i : -1))
+      .filter((i) => i !== -1)
+    if (indices.length === 0) continue
+
+    const tileInstances: THREE.Matrix4[] = []
     for (const i of indices) {
       const p = layout.placements[i]
-      tmp.makeTranslation(p.worldX, floorThickness, p.worldZ)
-      bake(ringGeo, tmp, mesh)
+      const m = new THREE.Matrix4()
+      if (options.packTilesAtOrigin) {
+        // Simple linear packing for standalone tile print if requested
+        m.makeTranslation((i % 20) * layout.pitch, 0, Math.floor(i / 20) * layout.pitch)
+      } else {
+        const offset = -7.8 / 2
+        m.makeTranslation(p.worldX + offset, floorY, p.worldZ + offset)
+      }
+      tileInstances.push(m)
     }
-    trays.push(mesh)
+
+    tiles.push({
+      name: `Tiles_${pal.label}`,
+      color: pal.hex,
+      geometry: masterAssets.block,
+      instances: tileInstances
+    })
   }
 
-  // --- Tiles per color ---
-  const byColor = new Map<number, number[]>()
-  layout.placements.forEach((p, i) => {
-    if (!byColor.has(p.colorIndex)) byColor.set(p.colorIndex, [])
-    byColor.get(p.colorIndex)!.push(i)
-  })
-  const tiles: BakedMesh[] = []
-  for (const [colorIndex, idxs] of [...byColor.entries()].sort((a, b) => a[0] - b[0])) {
-    const pal = palette[colorIndex]
-    const mesh = newMesh(`tiles-${pal.label}`, pal.hex)
-    for (const i of idxs) {
-      const p = layout.placements[i]
-      tmp.makeTranslation(p.worldX, floorY, p.worldZ)
-      bake(tileGeo, tmp, mesh)
-    }
-    tiles.push(mesh)
-  }
-
-  // --- Connector pegs (only when split) ---
-  let connectors: BakedMesh | null = null
-  if (split.connectorCount > 0) {
-    const pegGeo = createConnectorPegGeometry(layout.pitch)
-    connectors = newMesh("connector-pegs", "#94a3b8")
+  let connectors: InstancedExport | null = null
+  if (split.connectorCount > 0 && masterAssets.connector) {
+    const connectorInstances: THREE.Matrix4[] = []
     const perRow = Math.ceil(Math.sqrt(split.connectorCount))
     const gap = layout.pitch * 0.9
     const startX = layout.boardWidth / 2 + layout.pitch * 2
     for (let i = 0; i < split.connectorCount; i++) {
       const row = Math.floor(i / perRow)
       const col = i % perRow
-      tmp.makeTranslation(startX + col * gap, layout.pitch * 0.15, row * gap)
-      bake(pegGeo, tmp, connectors)
+      const m = new THREE.Matrix4()
+      m.makeTranslation(startX + col * gap, layout.pitch * 0.15, row * gap)
+      connectorInstances.push(m)
     }
-    pegGeo.dispose()
+    connectors = {
+      name: "Connectors",
+      color: "#888888",
+      geometry: masterAssets.connector,
+      instances: connectorInstances
+    }
   }
 
-  ringGeo.dispose()
-  tileGeo.dispose()
-  return { trays, tiles, connectors }
+  return { trays, tiles, connectors, texts }
+}
+
+/** Helper to bake instances into a flat triangle soup array for ZIP export */
+function bakeInstances(exp: InstancedExport): BakedMesh {
+  const geo = exp.geometry.index ? exp.geometry.toNonIndexed() : exp.geometry.clone()
+  const pos = geo.getAttribute("position")
+  const baked: BakedMesh = { name: exp.name, color: exp.color, positions: [] }
+  
+  for (const matrix of exp.instances) {
+    const g = geo.clone()
+    g.applyMatrix4(matrix)
+    const p = g.getAttribute("position")
+    for (let i = 0; i < p.count; i++) {
+      // Y-up -> Z-up: (x, y, z) => (x, z, y)
+      baked.positions.push(p.getX(i), p.getZ(i), p.getY(i))
+    }
+  }
+  return baked
 }
 
 /** Write a binary STL from one or more baked meshes (merged triangle soup). */
@@ -196,67 +257,113 @@ function hexToTriplet(hex: string): string {
 }
 
 /** Build a multi-material .3MF (zip + XML) with native per-object color materials. */
-export function build3MF(meshes: BakedMesh[]): Promise<Blob> {
+export function build3MF(assets: ExportAssets): Promise<Blob> {
   const zip = new JSZip()
+  const groups = [...assets.trays, ...assets.tiles, ...assets.texts]
+  if (assets.connectors) groups.push(assets.connectors)
 
   // Normalize so all coordinates are positive (3MF expects a positive octant).
   let minX = Infinity
   let minY = Infinity
   let minZ = Infinity
-  for (const m of meshes) {
-    const p = m.positions
-    for (let i = 0; i < p.length; i += 3) {
-      minX = Math.min(minX, p[i])
-      minY = Math.min(minY, p[i + 1])
-      minZ = Math.min(minZ, p[i + 2])
+  for (const grp of groups) {
+    const p = grp.geometry.getAttribute("position")
+    for (let i = 0; i < p.count; i++) {
+      // Geometry is Y-up, but 3MF is Z-up. Wait, we are instancing! 
+      // The instances matrices map world coordinates. So we find bounds in world.
+      for (const m of grp.instances) {
+        const v = new THREE.Vector3(p.getX(i), p.getY(i), p.getZ(i))
+        v.applyMatrix4(m)
+        minX = Math.min(minX, v.x)
+        minY = Math.min(minY, -v.z) // Z-up Y is -Z
+        minZ = Math.min(minZ, v.y)  // Z-up Z is Y
+      }
     }
   }
-  const ox = isFinite(minX) ? -minX : 0
-  const oy = isFinite(minY) ? -minY : 0
-  const oz = isFinite(minZ) ? -minZ : 0
+  const ox = isFinite(minX) && minX < 0 ? -minX : 0
+  const oy = isFinite(minY) && minY < 0 ? -minY : 0
+  const oz = isFinite(minZ) && minZ < 0 ? -minZ : 0
 
-  const baseEntries = meshes
-    .map((m) => `      <base name="${escapeXml(m.name)}" displaycolor="${hexToTriplet(m.color)}"/>`)
+  const colorEntries = groups
+    .map((g) => `      <m:color color="${hexToTriplet(g.color)}"/>`)
     .join("\n")
 
   const objects: string[] = []
   const buildItems: string[] = []
-  meshes.forEach((m, idx) => {
-    const objId = idx + 2 // 1 reserved for basematerials group
+  
+  let nextObjectId = 2 // 1 is reserved for basematerials
+
+  // Create an object for each geometry template
+  groups.forEach((grp, idx) => {
+    const templateId = nextObjectId++
+    
+    // Convert Y-up geometry to Z-up string
     const verts: string[] = []
     const tris: string[] = []
-    const p = m.positions
-    const vertCount = p.length / 3
-    for (let i = 0; i < p.length; i += 3) {
-      verts.push(
-        `<vertex x="${fmt(p[i] + ox)}" y="${fmt(p[i + 1] + oy)}" z="${fmt(p[i + 2] + oz)}"/>`,
-      )
+    const g = grp.geometry.index ? grp.geometry.toNonIndexed() : grp.geometry.clone()
+    const p = g.getAttribute("position")
+    const vertCount = p.count
+    for (let i = 0; i < p.count; i++) {
+      // Y-up -> Z-up via +90 rot X (x'=x, y'=-z, z'=y)
+      verts.push(`<vertex x="${fmt(p.getX(i))}" y="${fmt(-p.getZ(i))}" z="${fmt(p.getY(i))}"/>`)
     }
     for (let v = 0; v < vertCount; v += 3) {
-      tris.push(`<triangle v1="${v}" v2="${v + 1}" v3="${v + 2}"/>`)
+      tris.push(`<triangle v1="${v}" v2="${v + 1}" v3="${v + 2}" pid="1" p1="${idx}"/>`)
     }
+    
     objects.push(
-      `    <object id="${objId}" type="model" pid="1" pindex="${idx}">\n` +
-        `      <mesh>\n` +
-        `        <vertices>${verts.join("")}</vertices>\n` +
-        `        <triangles>${tris.join("")}</triangles>\n` +
-        `      </mesh>\n` +
-        `    </object>`,
+      `    <object id="${templateId}" type="model">\n` +
+      `      <mesh>\n` +
+      `        <vertices>${verts.join("")}</vertices>\n` +
+      `        <triangles>${tris.join("")}</triangles>\n` +
+      `      </mesh>\n` +
+      `    </object>`
     )
-    buildItems.push(`    <item objectid="${objId}"/>`)
+
+    // Instantiate it multiple times in the build section
+    for (const m of grp.instances) {
+      const e = m.elements
+      // m is column-major: 0,1,2,3 is col1. 4,5,6,7 is col2. 12,13,14 is translation (x,y,z).
+      // Transform Y-up matrix to Z-up 3MF matrix string.
+      // Y-up: translation = [x, y, z]. Z-up translation = [x, z, y]
+      const tx = e[12] + ox
+      const ty = e[13] + oy
+      const tz = e[14] + oz
+      
+      const item_tx = tx
+      const item_ty = -tz
+      const item_tz = ty
+      
+      buildItems.push(`    <item objectid="${templateId}" transform="1 0 0 0 1 0 0 0 1 ${fmt(item_tx)} ${fmt(item_ty)} ${fmt(item_tz)}"/>`)
+    }
   })
 
-  const model =
-    `<?xml version="1.0" encoding="UTF-8"?>\n` +
-    `<model unit="millimeter" xml:lang="en"\n` +
-    `  xmlns="http://schemas.microsoft.com/3dmanufacturing/core/2015/02"\n` +
-    `  xmlns:m="http://schemas.microsoft.com/3dmanufacturing/material/2015/02">\n` +
-    `  <resources>\n` +
-    `    <basematerials id="1">\n${baseEntries}\n    </basematerials>\n` +
-    `${objects.join("\n")}\n` +
-    `  </resources>\n` +
-    `  <build>\n${buildItems.join("\n")}\n  </build>\n` +
+  const modelChunks: string[] = []
+  modelChunks.push(
+    `<?xml version="1.0" encoding="UTF-8"?>\n`,
+    `<model unit="millimeter" xml:lang="en-US"\n`,
+    `  xmlns="http://schemas.microsoft.com/3dmanufacturing/core/2015/02"\n`,
+    `  xmlns:m="http://schemas.microsoft.com/3dmanufacturing/material/2015/02"\n`,
+    `  xmlns:slic3rpe="http://schemas.slic3r.org/3mf/2017/06">\n`,
+    `  <metadata name="Application">Pixel Puzzle Maker</metadata>\n`,
+    `  <metadata name="Title">Puzzle Board</metadata>\n`,
+    `  <metadata name="CreationDate">${new Date().toISOString().split("T")[0]}</metadata>\n`,
+    `  <metadata name="slic3rpe:3mf_version">2</metadata>\n`,
+    `  <resources>\n`,
+    `    <m:colorgroup id="1">\n${colorEntries}\n    </m:colorgroup>\n`
+  )
+  
+  for (const obj of objects) {
+    modelChunks.push(obj, "\n")
+  }
+
+  modelChunks.push(
+    `  </resources>\n`,
+    `  <build>\n${buildItems.join("\n")}\n  </build>\n`,
     `</model>\n`
+  )
+  
+  const modelBlob = new Blob(modelChunks, { type: "text/xml" })
 
   const contentTypes =
     `<?xml version="1.0" encoding="UTF-8"?>\n` +
@@ -273,7 +380,7 @@ export function build3MF(meshes: BakedMesh[]): Promise<Blob> {
 
   zip.file("[Content_Types].xml", contentTypes)
   zip.folder("_rels")!.file(".rels", rels)
-  zip.folder("3D")!.file("3dmodel.model", model)
+  zip.folder("3D")!.file("3dmodel.model", modelBlob)
   return zip.generateAsync({ type: "blob", mimeType: "model/3mf" })
 }
 
@@ -292,25 +399,24 @@ export function buildStlZip(assets: ExportAssets): Promise<Blob> {
   const zip = new JSZip()
   const trayFolder = zip.folder("trays")!
   if (assets.trays.length === 1) {
-    zip.file("tray.stl", writeBinarySTL([assets.trays[0]]))
+    zip.file("tray.stl", writeBinarySTL([bakeInstances(assets.trays[0])]))
   } else {
     for (const tray of assets.trays) {
-      trayFolder.file(`${tray.name}.stl`, writeBinarySTL([tray]))
+      trayFolder.file(`${tray.name}.stl`, writeBinarySTL([bakeInstances(tray)]))
     }
   }
   const tileFolder = zip.folder("tiles")!
   for (const t of assets.tiles) {
-    tileFolder.file(`${t.name}.stl`, writeBinarySTL([t]))
+    tileFolder.file(`${t.name}.stl`, writeBinarySTL([bakeInstances(t)]))
   }
   if (assets.connectors) {
-    zip.file("connector-pegs.stl", writeBinarySTL([assets.connectors]))
+    zip.file("connector-pegs.stl", writeBinarySTL([bakeInstances(assets.connectors)]))
   }
   const readme =
     "Pixel Puzzle Maker — STL package\n\n" +
-    "trays/   : tray sub-boards (snap-fit edges)\n" +
+    "trays/   : tray sub-boards\n" +
     "tiles/   : color-sorted tile batches\n" +
-    "connector-pegs.stl : bow-tie keys bridging split boards\n\n" +
-    "Tiles include a 0.2mm clearance for a free drop-fit.\n"
+    "connector-pegs.stl : bow-tie keys bridging split boards\n\n"
   zip.file("README.txt", readme)
   return zip.generateAsync({ type: "blob" })
 }

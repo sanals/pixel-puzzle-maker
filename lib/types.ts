@@ -4,7 +4,7 @@ export type TileShape = "square" | "cylinder" | "hexagon" | "heart"
 
 export type EmbossingStyle = "none" | "raised" | "recessed"
 
-export const GRID_SIZES = [16, 32, 48, 64, 96, 128] as const
+export const GRID_SIZES = [24, 48, 72, 96, 120] as const
 export type GridSize = (typeof GRID_SIZES)[number]
 
 export const MIN_COLORS = 2
@@ -74,7 +74,7 @@ export interface PuzzleConfig {
 }
 
 export const DEFAULT_CONFIG: PuzzleConfig = {
-  gridSize: 32,
+  gridSize: 48,
   colorCount: 4,
   tileShape: "square",
   embossing: "raised",

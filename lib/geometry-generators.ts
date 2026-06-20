@@ -1,29 +1,84 @@
 // Phase 4: Procedural 3D mesh & text generators.
 
 import * as THREE from "three"
+import { FontLoader, type Font } from "three-stdlib"
+import { TextGeometry } from "three-stdlib"
+import { Brush, Evaluator, SUBTRACTION, ADDITION } from "three-bvh-csg"
+import { STLLoader } from "three-stdlib"
 import type { GridLayout } from "./grid-engine"
 import type { EmbossingStyle, PaletteColor, TileShape } from "./types"
 
+let cachedFont: Font | null = null
+export async function getFont(): Promise<Font> {
+  if (cachedFont) return cachedFont
+  return new Promise((resolve, reject) => {
+    new FontLoader().load(
+      "/fonts/helvetiker_bold.typeface.json",
+      (font) => {
+        cachedFont = font
+        resolve(font)
+      },
+      undefined,
+      (err) => reject(err),
+    )
+  })
+}
+
+export type MasterAssets = {
+  base: THREE.BufferGeometry
+  block: THREE.BufferGeometry
+  connector: THREE.BufferGeometry
+}
+
+let cachedAssets: MasterAssets | null = null
+
+export async function loadMasterAssets(): Promise<MasterAssets> {
+  if (cachedAssets) return cachedAssets
+  const loader = new STLLoader()
+  const [base, block, connector] = await Promise.all([
+    loader.loadAsync("/models/assemble_1.stl"),
+    loader.loadAsync("/models/sample_block.stl"),
+    loader.loadAsync("/models/connector_47.stl"),
+  ])
+  
+  // The master STLs from CAD are Z-up. 
+  // Three.js is Y-up. So we rotate them -90 degrees around X.
+  base.rotateX(-Math.PI / 2)
+  block.rotateX(-Math.PI / 2)
+  connector.rotateX(-Math.PI / 2)
+
+  // Center geometries if needed, or leave them as modeled by the user
+  // We'll calculate their bounding boxes for layout positioning
+  base.computeBoundingBox()
+  block.computeBoundingBox()
+  connector.computeBoundingBox()
+
+  cachedAssets = { base, block, connector }
+  return cachedAssets
+}
+
+/** Pre-cache the standard materials used by the 3D preview. */
 /** Real-world 3D-print clearance shrink applied around every tile contour (mm). */
-export const TILE_CLEARANCE_MM = 0.2
+export const TILE_SHRINK_MM = 0.1 // Shrink tile by 0.1mm radially
+const POCKET_EXPAND_MM = 0.05 // Expand pocket by 0.05mm radially
 
 /**
  * Build a flat 2D outline (THREE.Shape) for a tile/pocket footprint.
  * `r` is the half-extent (radius) of the footprint in mm.
  */
-export function buildShape(shape: TileShape, r: number): THREE.Shape {
+export function buildShape(shape: TileShape, r: number, cx = 0, cy = 0): THREE.Shape {
   const s = new THREE.Shape()
   switch (shape) {
     case "cylinder": {
-      s.absarc(0, 0, r, 0, Math.PI * 2, false)
+      s.absarc(cx, cy, r, 0, Math.PI * 2, false)
       break
     }
     case "hexagon": {
       // Flat-top hexagon nested for honeycomb packing.
       for (let i = 0; i < 6; i++) {
         const a = (Math.PI / 180) * (60 * i)
-        const x = r * Math.cos(a)
-        const y = r * Math.sin(a)
+        const x = cx + r * Math.cos(a)
+        const y = cy + r * Math.sin(a)
         if (i === 0) s.moveTo(x, y)
         else s.lineTo(x, y)
       }
@@ -39,8 +94,8 @@ export function buildShape(shape: TileShape, r: number): THREE.Shape {
         const x = 16 * Math.pow(Math.sin(t), 3)
         const y =
           13 * Math.cos(t) - 5 * Math.cos(2 * t) - 2 * Math.cos(3 * t) - Math.cos(4 * t)
-        const px = x * scale
-        const py = y * scale
+        const px = cx + x * scale
+        const py = cy + y * scale
         if (i === 0) s.moveTo(px, py)
         else s.lineTo(px, py)
       }
@@ -49,10 +104,10 @@ export function buildShape(shape: TileShape, r: number): THREE.Shape {
     }
     case "square":
     default: {
-      s.moveTo(-r, -r)
-      s.lineTo(r, -r)
-      s.lineTo(r, r)
-      s.lineTo(-r, r)
+      s.moveTo(cx - r, cy - r)
+      s.lineTo(cx + r, cy - r)
+      s.lineTo(cx + r, cy + r)
+      s.lineTo(cx - r, cy + r)
       s.closePath()
       break
     }
@@ -75,7 +130,7 @@ export function createTileGeometry(
   tileSize: number,
   height: number,
 ): THREE.BufferGeometry {
-  const r = tileSize / 2 - TILE_CLEARANCE_MM
+  const r = tileSize / 2 - TILE_SHRINK_MM
   const path = buildShape(shape, Math.max(0.5, r))
   const geo = new THREE.ExtrudeGeometry(path, {
     depth: height,
@@ -89,29 +144,78 @@ export function createTileGeometry(
   return geo
 }
 
-/**
- * Pocket "well" ring (the routed-out wall around each pocket) for the waffle tray.
- * Outer footprint = full pitch cell, inner hole = tile footprint + slack.
- */
-export function createPocketRingGeometry(
-  shape: TileShape,
-  pitch: number,
-  tileSize: number,
-  depth: number,
+import { mergeBufferGeometries } from "three-stdlib"
+
+export function createTrayGeometry(
+  layout: GridLayout,
+  indices: number[],
+  w: number,
+  d: number,
+  cx: number,
+  cz: number,
+  textBrush?: Brush,
+  textOp?: number
 ): THREE.BufferGeometry {
-  const outer = buildShape(shape, pitch / 2)
-  const inner = buildShape(shape, tileSize / 2 + TILE_CLEARANCE_MM)
-  outer.holes.push(inner)
-  const geo = new THREE.ExtrudeGeometry(outer, {
-    depth,
+  const outer = new THREE.Shape()
+  outer.moveTo(-w / 2, -d / 2)
+  outer.lineTo(w / 2, -d / 2)
+  outer.lineTo(w / 2, d / 2)
+  outer.lineTo(-w / 2, d / 2)
+  outer.closePath()
+
+  const holeRadius = layout.tileSize / 2 + POCKET_EXPAND_MM
+  for (const i of indices) {
+    const p = layout.placements[i]
+    const lx = p.worldX - cx
+    const lz = p.worldZ - cz
+    const hole = buildShape(layout.shape, holeRadius, lx, lz)
+    outer.holes.push(hole)
+  }
+
+  const floorThickness = layout.baseHeight - layout.pocketDepth
+  
+  // The lattice walls
+  const latticeGeo = new THREE.ExtrudeGeometry(outer, {
+    depth: layout.pocketDepth,
     bevelEnabled: false,
-    curveSegments: shape === "cylinder" || shape === "heart" ? 24 : 6,
+    curveSegments: layout.shape === "cylinder" || layout.shape === "heart" ? 24 : 6,
   })
-  layFlat(geo)
-  geo.translate(0, depth, 0)
-  geo.computeVertexNormals()
-  return geo
+  layFlat(latticeGeo)
+  latticeGeo.translate(0, floorThickness + layout.pocketDepth, 0)
+  latticeGeo.computeVertexNormals()
+
+  // The solid floor
+  const floorGeo = new THREE.BoxGeometry(w, floorThickness, d)
+  floorGeo.translate(0, floorThickness / 2, 0)
+
+  // Merge them safely by ensuring matching attributes and no indices
+  let floorNonIdx = floorGeo.index ? floorGeo.toNonIndexed() : floorGeo.clone()
+  const latticeNonIdx = latticeGeo.index ? latticeGeo.toNonIndexed() : latticeGeo.clone()
+
+  if (textBrush && textOp !== undefined) {
+    const floorBrush = new Brush(floorNonIdx)
+    floorBrush.updateMatrixWorld()
+    
+    // We create a fresh evaluator for safety
+    const localEvaluator = new Evaluator()
+    localEvaluator.useGroups = false
+    
+    const result = localEvaluator.evaluate(floorBrush, textBrush, textOp)
+    floorNonIdx.dispose()
+    floorNonIdx = result.geometry
+  }
+
+  const merged = mergeBufferGeometries([floorNonIdx, latticeNonIdx])
+  
+  floorGeo.dispose()
+  latticeGeo.dispose()
+  floorNonIdx.dispose()
+  latticeNonIdx.dispose()
+
+  return merged!
 }
+
+
 
 /** Generate a crisp alpha texture for a single character label. */
 export function createLabelTexture(label: string, fg: string, bg?: string): THREE.CanvasTexture {
@@ -144,11 +248,14 @@ export interface SceneBuildResult {
  * Assemble the full preview scene: pocketed waffle tray + instanced tiles + letter decals.
  * Uses InstancedMesh so even 128x128 (16,384 tiles) stays performant.
  */
-export function buildPuzzleGroup(
+export async function buildPuzzleGroup(
   layout: GridLayout,
   palette: PaletteColor[],
   embossing: EmbossingStyle,
-): SceneBuildResult {
+): Promise<SceneBuildResult> {
+  // Ensure master assets are loaded before we start assembling the layout.
+  await loadMasterAssets()
+
   const group = new THREE.Group()
   const disposables: { dispose: () => void }[] = []
   const track = <T extends { dispose: () => void }>(o: T): T => {
@@ -161,40 +268,44 @@ export function buildPuzzleGroup(
 
   const floorThickness = layout.baseHeight - layout.pocketDepth
 
-  // --- Base slab ---
-  const baseGeo = track(
-    new THREE.BoxGeometry(layout.boardWidth, floorThickness, layout.boardDepth),
-  )
-  const baseMat = track(
-    new THREE.MeshStandardMaterial({ color: trayColor, roughness: 0.9, metalness: 0.02 }),
-  )
-  const base = new THREE.Mesh(baseGeo, baseMat)
-  base.position.y = floorThickness / 2
-  base.receiveShadow = true
-  base.castShadow = true
-  group.add(base)
+  // --- Monolithic Tray Base ---
+  // Tile the master base tray to cover the requested grid.
+  // The master tray is exactly 24x24 pockets, 224x224mm.
+  const TRAY_SIZE = 224.0
+  const numBoardsX = Math.ceil(layout.boardWidth / TRAY_SIZE)
+  const numBoardsZ = Math.ceil(layout.boardDepth / TRAY_SIZE)
 
-  // --- Pocket rings (routed voids) as one InstancedMesh ---
-  const ringGeo = track(
-    createPocketRingGeometry(layout.shape, layout.pitch, layout.tileSize, layout.pocketDepth),
-  )
-  const ringMat = track(
-    new THREE.MeshStandardMaterial({ color: trayColor, roughness: 0.92, metalness: 0.02 }),
-  )
-  const rings = new THREE.InstancedMesh(ringGeo, ringMat, count)
-  rings.castShadow = true
-  rings.receiveShadow = true
-  const m = new THREE.Matrix4()
-  for (let i = 0; i < count; i++) {
-    const p = layout.placements[i]
-    m.makeTranslation(p.worldX, floorThickness, p.worldZ)
-    rings.setMatrixAt(i, m)
+  if (cachedAssets) {
+    const baseGeo = track(cachedAssets.base.clone())
+    const trayMat = track(
+      new THREE.MeshStandardMaterial({ color: trayColor, roughness: 0.9, metalness: 0.02 }),
+    )
+    const baseInst = new THREE.InstancedMesh(baseGeo, trayMat, numBoardsX * numBoardsZ)
+    baseInst.receiveShadow = true
+    baseInst.castShadow = true
+    
+    let idx = 0
+    const mTray = new THREE.Matrix4()
+    for (let x = 0; x < numBoardsX; x++) {
+      for (let z = 0; z < numBoardsZ; z++) {
+        // The master STL bounding box has min=0, max=224
+        // Our layout starts from worldX = -boardWidth/2 + pitch/2
+        // We need to carefully align the tiled boards to the layout.
+        // Easiest way: The board 0,0 spans from x=0 to 224.
+        // We want the total assembled board to be centered around 0,0.
+        const totalW = numBoardsX * TRAY_SIZE
+        const totalD = numBoardsZ * TRAY_SIZE
+        const px = -totalW / 2 + x * TRAY_SIZE
+        const pz = -totalD / 2 + z * TRAY_SIZE
+        mTray.makeTranslation(px, 0, pz)
+        baseInst.setMatrixAt(idx++, mTray)
+      }
+    }
+    baseInst.instanceMatrix.needsUpdate = true
+    group.add(baseInst)
   }
-  rings.instanceMatrix.needsUpdate = true
-  group.add(rings)
 
   // --- Tiles, grouped per palette color into one InstancedMesh each ---
-  const tileGeo = track(createTileGeometry(layout.shape, layout.tileSize, layout.tileHeight))
   const floorY = floorThickness
   const byColor = new Map<number, number[]>()
   for (let i = 0; i < count; i++) {
@@ -203,8 +314,12 @@ export function buildPuzzleGroup(
     byColor.get(ci)!.push(i)
   }
 
+  const m = new THREE.Matrix4()
+
   for (const [colorIndex, indices] of byColor) {
     const pal = palette[colorIndex]
+    const tileGeo = cachedAssets ? track(cachedAssets.block.clone()) : track(createTileGeometry(layout.shape, layout.tileSize, layout.tileHeight))
+    
     const mat = track(
       new THREE.MeshStandardMaterial({
         color: new THREE.Color(pal.hex),
@@ -217,7 +332,9 @@ export function buildPuzzleGroup(
     inst.receiveShadow = true
     indices.forEach((idx, j) => {
       const p = layout.placements[idx]
-      m.makeTranslation(p.worldX, floorY, p.worldZ)
+      // Block STL min is 0, max is 7.8. So we must center it.
+      const offset = cachedAssets ? -7.8 / 2 : 0
+      m.makeTranslation(p.worldX + offset, floorY, p.worldZ + offset)
       inst.setMatrixAt(j, m)
     })
     inst.instanceMatrix.needsUpdate = true
@@ -229,9 +346,7 @@ export function buildPuzzleGroup(
   if (embossing !== "none") {
     const planeSize = layout.tileSize * 0.62
     const raised = embossing === "raised"
-    const decalY = raised
-      ? floorY + layout.tileHeight + 0.05
-      : floorY + 0.06
+    const decalY = floorThickness + 0.01 // barely above the pocket floor
     for (const [colorIndex, indices] of byColor) {
       const pal = palette[colorIndex]
       // Choose contrasting ink for legibility.

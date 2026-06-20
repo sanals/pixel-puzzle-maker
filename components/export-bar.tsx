@@ -13,7 +13,7 @@ import {
 } from "@/lib/exporters"
 
 export function ExportBar() {
-  const { layout, split, matrix, hasImage } = usePuzzle()
+  const { layout, split, matrix, hasImage, config } = usePuzzle()
   const [busy, setBusy] = useState<null | "3mf" | "zip">(null)
   const disabled = !hasImage || !layout || !matrix || !split
 
@@ -22,11 +22,8 @@ export function ExportBar() {
     setBusy("3mf")
     const id = toast.loading("Building multi-color 3MF…")
     try {
-      const assets = assembleExportAssets(layout!, matrix!.palette, split!)
-      // Color-locked materials: tiles per color + tray sub-boards + connectors.
-      const meshes = [...assets.tiles, ...assets.trays]
-      if (assets.connectors) meshes.push(assets.connectors)
-      const blob = await build3MF(meshes)
+      const assets = await assembleExportAssets(layout!, matrix!.palette, split!, config.embossing)
+      const blob = await build3MF(assets)
       downloadBlob(blob, "pixel-puzzle.3mf")
       toast.success("Exported pixel-puzzle.3mf", {
         id,
@@ -45,7 +42,7 @@ export function ExportBar() {
     setBusy("zip")
     const id = toast.loading("Packaging STL archive…")
     try {
-      const assets = assembleExportAssets(layout!, matrix!.palette, split!)
+      const assets = await assembleExportAssets(layout!, matrix!.palette, split!, config.embossing, { packTilesAtOrigin: true })
       const blob = await buildStlZip(assets)
       downloadBlob(blob, "pixel-puzzle-stl.zip")
       toast.success("Exported pixel-puzzle-stl.zip", {
@@ -85,6 +82,12 @@ export function ExportBar() {
         <p className="flex items-start gap-1.5 px-1 text-xs text-muted-foreground">
           <Layers className="mt-0.5 size-3.5 shrink-0 text-primary" aria-hidden="true" />
           <span>{split.reason} Auto-split into {split.subBoards.length} boards.</span>
+        </p>
+      )}
+      {layout && layout.placements.length > 2000 && (
+        <p className="flex items-start gap-1.5 px-1 text-xs text-orange-400">
+          <Box className="mt-0.5 size-3.5 shrink-0" aria-hidden="true" />
+          <span>Warning: High tile count ({layout.placements.length}). Multi-color 3MF export will produce massive filament waste due to toolhead changes. Consider exporting the Monolithic STL Zip to print each color separately.</span>
         </p>
       )}
     </div>

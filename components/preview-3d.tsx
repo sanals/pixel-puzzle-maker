@@ -69,8 +69,17 @@ export function Preview3D({ layout, palette, embossing }: Preview3DProps) {
     ground.receiveShadow = true
     scene.add(ground)
 
-    const { group, dispose } = buildPuzzleGroup(layout, palette, embossing)
-    scene.add(group)
+    let currentDispose: (() => void) | null = null
+    let mounted = true
+
+    buildPuzzleGroup(layout, palette, embossing).then(({ group, dispose }) => {
+      if (!mounted) {
+        dispose()
+        return
+      }
+      currentDispose = dispose
+      scene.add(group)
+    })
 
     let raf = 0
     const animate = () => {
@@ -94,7 +103,8 @@ export function Preview3D({ layout, palette, embossing }: Preview3DProps) {
       cancelAnimationFrame(raf)
       ro.disconnect()
       controls.dispose()
-      dispose()
+      mounted = false
+      if (currentDispose) currentDispose()
       groundGeo.dispose()
       groundMat.dispose()
       renderer.dispose()

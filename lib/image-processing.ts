@@ -47,8 +47,9 @@ export function contrastText(r: number, g: number, b: number): string {
 }
 
 export interface DownscaledImage {
-  size: number
-  /** Flat RGB array, length size*size*3, row-major (y outer, x inner). */
+  width: number
+  height: number
+  /** Flat RGB array, length width*height*3, row-major (y outer, x inner). */
   pixels: Uint8ClampedArray
 }
 
@@ -56,26 +57,25 @@ export interface DownscaledImage {
  * Center-crop "cover" downscale using strict nearest-neighbor sampling.
  * The source is cropped to a centered square then sampled into a size x size grid.
  */
-export function coverCropDownscale(image: ImageData, size: number): DownscaledImage {
+export function coverCropDownscale(image: ImageData, maxSize: number): DownscaledImage {
   const { width: sw, height: sh, data } = image
-  const side = Math.min(sw, sh)
-  const offX = Math.floor((sw - side) / 2)
-  const offY = Math.floor((sh - side) / 2)
-  const out = new Uint8ClampedArray(size * size * 3)
+  const scale = maxSize / Math.max(sw, sh)
+  const outWidth = Math.max(1, Math.round(sw * scale))
+  const outHeight = Math.max(1, Math.round(sh * scale))
+  const out = new Uint8ClampedArray(outWidth * outHeight * 3)
 
-  for (let gy = 0; gy < size; gy++) {
-    // Sample the center of each output cell for stable nearest-neighbor results.
-    const srcY = offY + Math.floor(((gy + 0.5) / size) * side)
-    for (let gx = 0; gx < size; gx++) {
-      const srcX = offX + Math.floor(((gx + 0.5) / size) * side)
+  for (let gy = 0; gy < outHeight; gy++) {
+    const srcY = Math.floor(((gy + 0.5) / outHeight) * sh)
+    for (let gx = 0; gx < outWidth; gx++) {
+      const srcX = Math.floor(((gx + 0.5) / outWidth) * sw)
       const sIdx = (srcY * sw + srcX) * 4
-      const oIdx = (gy * size + gx) * 3
+      const oIdx = (gy * outWidth + gx) * 3
       out[oIdx] = data[sIdx]
       out[oIdx + 1] = data[sIdx + 1]
       out[oIdx + 2] = data[sIdx + 2]
     }
   }
-  return { size, pixels: out }
+  return { width: outWidth, height: outHeight, pixels: out }
 }
 
 interface Cluster {
@@ -205,7 +205,7 @@ export function quantize(
  * Palette entries are sorted by luminance for stable, deterministic labels.
  */
 export function buildMatrix(img: DownscaledImage, k: number, seed?: number): VoxelMatrix {
-  const { size } = img
+  const { width, height } = img
   const { palette, assignments } = quantize(img, k, seed)
 
   // Count occurrences.
@@ -218,7 +218,7 @@ export function buildMatrix(img: DownscaledImage, k: number, seed?: number): Vox
     .sort((a, b) => a.lum - b.lum || a.i - b.i)
 
   const oldToNew = new Map<number, number>()
-  const totalPixels = size * size
+  const totalPixels = width * height
   const finalPalette: PaletteColor[] = order.map((entry, newIdx) => {
     oldToNew.set(entry.i, newIdx)
     const c = palette[entry.i]
@@ -237,10 +237,10 @@ export function buildMatrix(img: DownscaledImage, k: number, seed?: number): Vox
   })
 
   // Build cells as matrix[x][y].
-  const cells: VoxelCell[][] = Array.from({ length: size }, () => new Array<VoxelCell>(size))
-  for (let gy = 0; gy < size; gy++) {
-    for (let gx = 0; gx < size; gx++) {
-      const oldIdx = assignments[gy * size + gx]
+  const cells: VoxelCell[][] = Array.from({ length: width }, () => new Array<VoxelCell>(height))
+  for (let gy = 0; gy < height; gy++) {
+    for (let gx = 0; gx < width; gx++) {
+      const oldIdx = assignments[gy * width + gx]
       const newIdx = oldToNew.get(oldIdx) ?? 0
       const p = finalPalette[newIdx]
       cells[gx][gy] = {
@@ -251,5 +251,5 @@ export function buildMatrix(img: DownscaledImage, k: number, seed?: number): Vox
     }
   }
 
-  return { width: size, height: size, cells, palette: finalPalette }
+  return { width, height, cells, palette: finalPalette }
 }

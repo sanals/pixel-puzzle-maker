@@ -44,29 +44,32 @@ export function isHoneycomb(shape: TileShape): boolean {
  * - Honeycomb (hexagon): odd rows shifted half a tile; rows stepped by pitch*sin(60°).
  */
 export function computeLayout(matrix: VoxelMatrix, config: PuzzleConfig): GridLayout {
-  const size = matrix.width
+  const width = matrix.width
+  const height = matrix.height
   const honeycomb = isHoneycomb(config.tileShape)
 
-  // mm per logical cell along the longest edge.
-  const pitch = config.physicalSizeMm / size
-  const tileSize = pitch * 0.96 // small inter-tile margin
-  const baseHeight = Math.max(3, pitch * 0.35)
-  const tileHeight = Math.max(2.4, pitch * 0.55)
-  const pocketDepth = Math.min(baseHeight - 1, tileHeight * 0.7)
+  // Lock pitch to the master STL dimensions (224mm / 24 pockets = 9.3333mm)
+  const pitch = 224.0 / 24.0
+  const tileSize = 7.8 // Master block STL size
+  
+  // These are roughly inferred from the STLs for visualization purposes
+  const baseHeight = 9.4 
+  const tileHeight = 7.2
+  const pocketDepth = 6.0 
 
-  const rowStep = honeycomb ? pitch * SIN_60 : pitch
+  const rowStep = pitch
   const colStep = pitch
 
-  const spanX = (size - 1) * colStep + (honeycomb ? pitch / 2 : 0)
-  const spanZ = (size - 1) * rowStep
+  const spanX = (width - 1) * colStep + (honeycomb ? pitch / 2 : 0)
+  const spanZ = (height - 1) * rowStep
   const halfX = spanX / 2
   const halfZ = spanZ / 2
 
   const placements: CellPlacement[] = []
-  for (let gy = 0; gy < size; gy++) {
+  for (let gy = 0; gy < height; gy++) {
     const rowShift = honeycomb && gy % 2 === 1 ? pitch / 2 : 0
     const worldZ = gy * rowStep - halfZ
-    for (let gx = 0; gx < size; gx++) {
+    for (let gx = 0; gx < width; gx++) {
       const cell = matrix.cells[gx][gy]
       const worldX = gx * colStep + rowShift - halfX
       placements.push({
