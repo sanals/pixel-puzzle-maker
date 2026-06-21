@@ -97,6 +97,7 @@ export async function assembleExportAssets(
       const textGeo = new TextGeometry(pal.label, {
         font, size: fontSize, height: textDepth, curveSegments: 2, bevelEnabled: false
       })
+      textGeo.deleteAttribute('uv')
       textGeo.center()
       textGeo.rotateX(-Math.PI / 2)
       
@@ -114,6 +115,7 @@ export async function assembleExportAssets(
   const baseNonIdx = masterAssets.base.index ? masterAssets.base.toNonIndexed() : masterAssets.base.clone()
   const localEvaluator = new Evaluator()
   localEvaluator.useGroups = false
+  localEvaluator.attributes = ['position', 'normal']
 
   for (let x = 0; x < numBoardsX; x++) {
     for (let z = 0; z < numBoardsZ; z++) {
@@ -172,36 +174,50 @@ export async function assembleExportAssets(
 
   // --- Tiles ---
   const tiles: InstancedExport[] = []
+  const MAX_COLS = 26 // 26 * 8.75 = 227.5mm (comfortably fits on 256x256 plate)
+  const MAX_PER_PLATE = MAX_COLS * MAX_COLS
+
   for (const [colorIndex, pal] of palette.entries()) {
     const indices = layout.placements
       .map((p, i) => (p.colorIndex === colorIndex ? i : -1))
       .filter((i) => i !== -1)
     if (indices.length === 0) continue
 
-    const tileInstances: THREE.Matrix4[] = []
-    for (let idx = 0; idx < indices.length; idx++) {
-      const i = indices[idx]
-      const p = layout.placements[i]
-      const m = new THREE.Matrix4()
-      if (options.packTilesAtOrigin) {
-        // Simple linear packing for standalone tile print if requested
-        const maxPerPlate = 30 * 30
-        const localIdx = idx % maxPerPlate
-        const col = localIdx % 30
-        const row = Math.floor(localIdx / 30)
-        m.makeTranslation(col * layout.pitch, 3.6, row * layout.pitch)
-      } else {
-        m.makeTranslation(p.worldX, floorY + 3.6, p.worldZ)
-      }
-      tileInstances.push(m)
-    }
+    // Chunk into separate plates if there are too many tiles
+    for (let chunkStart = 0; chunkStart < indices.length; chunkStart += MAX_PER_PLATE) {
+      const chunkIndices = indices.slice(chunkStart, chunkStart + MAX_PER_PLATE)
+      const tileInstances: THREE.Matrix4[] = []
+      
+      const numCols = Math.min(MAX_COLS, chunkIndices.length)
+      const numRows = Math.ceil(chunkIndices.length / MAX_COLS)
+      const totalW = (numCols - 1) * layout.pitch
+      const totalD = (numRows - 1) * layout.pitch
+      const startX = -totalW / 2
+      const startZ = -totalD / 2
 
-    tiles.push({
-      name: `Tiles_${pal.label}`,
-      color: pal.hex,
-      geometry: masterAssets.block,
-      instances: tileInstances
-    })
+      for (let localIdx = 0; localIdx < chunkIndices.length; localIdx++) {
+        const p = layout.placements[chunkIndices[localIdx]]
+        const m = new THREE.Matrix4()
+        
+        if (options.packTilesAtOrigin) {
+          const col = localIdx % MAX_COLS
+          const row = Math.floor(localIdx / MAX_COLS)
+          // Center the grid perfectly around the origin
+          m.makeTranslation(startX + col * layout.pitch, 3.6, startZ + row * layout.pitch)
+        } else {
+          m.makeTranslation(p.worldX, floorY + 3.6, p.worldZ)
+        }
+        tileInstances.push(m)
+      }
+
+      const partSuffix = indices.length > MAX_PER_PLATE ? `_Part_${Math.floor(chunkStart / MAX_PER_PLATE) + 1}` : ""
+      tiles.push({
+        name: `Tiles_${pal.label}${partSuffix}`,
+        color: pal.hex,
+        geometry: masterAssets.block,
+        instances: tileInstances
+      })
+    }
   }
 
   let connectors: InstancedExport | null = null
