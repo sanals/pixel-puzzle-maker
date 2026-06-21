@@ -30,13 +30,14 @@ export type MasterAssets = {
   connector: THREE.BufferGeometry
 }
 
-let cachedAssets: MasterAssets | null = null
+let cachedAssets: Record<number, MasterAssets> = {}
 
-export async function loadMasterAssets(): Promise<MasterAssets> {
-  if (cachedAssets) return cachedAssets
+export async function loadMasterAssets(basePlateSize: number): Promise<MasterAssets> {
+  if (cachedAssets[basePlateSize]) return cachedAssets[basePlateSize]
   const loader = new STLLoader()
+  const baseFile = basePlateSize === 16 ? "/models/base_16_x_16.stl" : "/models/base_24_x_24.stl"
   const [base, block, connector] = await Promise.all([
-    loader.loadAsync("/models/assemble_1.stl"),
+    loader.loadAsync(baseFile),
     loader.loadAsync("/models/sample_block.stl"),
     loader.loadAsync("/models/connector_47.stl"),
   ])
@@ -50,11 +51,11 @@ export async function loadMasterAssets(): Promise<MasterAssets> {
   // Center geometries if needed, or leave them as modeled by the user
   // We'll calculate their bounding boxes for layout positioning
   base.computeBoundingBox()
-  block.computeBoundingBox()
+  block.center()
   connector.computeBoundingBox()
 
-  cachedAssets = { base, block, connector }
-  return cachedAssets
+  cachedAssets[basePlateSize] = { base, block, connector }
+  return cachedAssets[basePlateSize]
 }
 
 /** Pre-cache the standard materials used by the 3D preview. */
@@ -254,7 +255,7 @@ export async function buildPuzzleGroup(
   embossing: EmbossingStyle,
 ): Promise<SceneBuildResult> {
   // Ensure master assets are loaded before we start assembling the layout.
-  await loadMasterAssets()
+  const assets = await loadMasterAssets(layout.basePlateSize)
 
   const group = new THREE.Group()
   const disposables: { dispose: () => void }[] = []
@@ -270,13 +271,13 @@ export async function buildPuzzleGroup(
 
   // --- Monolithic Tray Base ---
   // Tile the master base tray to cover the requested grid.
-  // The master tray is exactly 24x24 pockets, 224x224mm.
-  const TRAY_SIZE = 224.0
+  // The master tray is either 16x16 (140mm) or 24x24 (210mm) pockets.
+  const TRAY_SIZE = layout.basePlateSize * layout.pitch
   const numBoardsX = Math.ceil(layout.boardWidth / TRAY_SIZE)
   const numBoardsZ = Math.ceil(layout.boardDepth / TRAY_SIZE)
 
-  if (cachedAssets) {
-    const baseGeo = track(cachedAssets.base.clone())
+  if (assets) {
+    const baseGeo = track(assets.base.clone())
     const trayMat = track(
       new THREE.MeshStandardMaterial({ color: trayColor, roughness: 0.9, metalness: 0.02 }),
     )
@@ -285,19 +286,25 @@ export async function buildPuzzleGroup(
     baseInst.castShadow = true
     
     let idx = 0
-    const mTray = new THREE.Matrix4()
     for (let x = 0; x < numBoardsX; x++) {
       for (let z = 0; z < numBoardsZ; z++) {
-        // The master STL bounding box has min=0, max=224
-        // Our layout starts from worldX = -boardWidth/2 + pitch/2
-        // We need to carefully align the tiled boards to the layout.
-        // Easiest way: The board 0,0 spans from x=0 to 224.
-        // We want the total assembled board to be centered around 0,0.
+        const mTray = new THREE.Matrix4()
+        // Trays center at 0,0 locally. We need to align the cluster.
         const totalW = numBoardsX * TRAY_SIZE
         const totalD = numBoardsZ * TRAY_SIZE
-        const px = -totalW / 2 + x * TRAY_SIZE
-        const pz = -totalD / 2 + z * TRAY_SIZE
+        
+        // Because the base plate STLs have their origin at (0,0) at the bottom-left corner,
+        // Wait! The previous assemble_1.stl was centered at (112, 112). 
+        // Are the new base_X_X.stl files centered?
+        // I will compute their bounding boxes to center them perfectly.
+        const bbox = baseGeo.boundingBox!
+        const cx = (bbox.max.x + bbox.min.x) / 2
+        const cz = (bbox.max.z + bbox.min.z) / 2
+        
+        const px = -totalW / 2 + (x * TRAY_SIZE) + (TRAY_SIZE / 2) - cx
+        const pz = -totalD / 2 + (z * TRAY_SIZE) + (TRAY_SIZE / 2) - cz
         mTray.makeTranslation(px, 0, pz)
+        
         baseInst.setMatrixAt(idx++, mTray)
       }
     }
@@ -318,7 +325,7 @@ export async function buildPuzzleGroup(
 
   for (const [colorIndex, indices] of byColor) {
     const pal = palette[colorIndex]
-    const tileGeo = cachedAssets ? track(cachedAssets.block.clone()) : track(createTileGeometry(layout.shape, layout.tileSize, layout.tileHeight))
+    const tileGeo = assets ? track(assets.block.clone()) : track(createTileGeometry(layout.shape, layout.tileSize, layout.tileHeight))
     
     const mat = track(
       new THREE.MeshStandardMaterial({
@@ -332,9 +339,8 @@ export async function buildPuzzleGroup(
     inst.receiveShadow = true
     indices.forEach((idx, j) => {
       const p = layout.placements[idx]
-      // Block STL min is 0, max is 7.8. So we must center it.
-      const offset = cachedAssets ? -7.8 / 2 : 0
-      m.makeTranslation(p.worldX + offset, floorY, p.worldZ + offset)
+      // The block is centered, so we must raise it by half its height (3.6mm) so its bottom rests on floorY
+      m.makeTranslation(p.worldX, floorY + 3.6, p.worldZ)
       inst.setMatrixAt(j, m)
     })
     inst.instanceMatrix.needsUpdate = true
@@ -349,10 +355,10 @@ export async function buildPuzzleGroup(
     const decalY = floorThickness + 0.01 // barely above the pocket floor
     for (const [colorIndex, indices] of byColor) {
       const pal = palette[colorIndex]
-      // Choose contrasting ink for legibility.
+      // Choose contrasting ink for legibility on raised tiles. Tray floor is light grey, so use dark ink for recessed.
       const lum =
         (0.2126 * pal.rgb[0] + 0.7152 * pal.rgb[1] + 0.0722 * pal.rgb[2]) / 255
-      const ink = lum > 0.45 ? "#0b1020" : "#f8fafc"
+      const ink = raised ? (lum > 0.45 ? "#0b1020" : "#f8fafc") : "#0b1020"
       const tex = track(createLabelTexture(pal.label, ink))
       const planeGeo = track(new THREE.PlaneGeometry(planeSize, planeSize))
       const planeMat = track(

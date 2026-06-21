@@ -69,71 +69,103 @@ export async function assembleExportAssets(
   const floorY = layout.baseHeight - layout.pocketDepth
   const tmp = new THREE.Matrix4()
   const font = await getFont()
-  const masterAssets = await loadMasterAssets()
+  const masterAssets = await loadMasterAssets(layout.basePlateSize)
 
   const trays: InstancedExport[] = []
   const texts: InstancedExport[] = []
 
-  // --- Trays ---
-  // The master tray is exactly 224x224mm. 
-  const TRAY_SIZE = 224.0
+  // --- Trays & Text Embossing ---
+  const TRAY_SIZE = layout.basePlateSize * layout.pitch
   const numBoardsX = Math.ceil(layout.boardWidth / TRAY_SIZE)
   const numBoardsZ = Math.ceil(layout.boardDepth / TRAY_SIZE)
   
-  const trayInstances: THREE.Matrix4[] = []
-  for (let x = 0; x < numBoardsX; x++) {
-    for (let z = 0; z < numBoardsZ; z++) {
-      const totalW = numBoardsX * TRAY_SIZE
-      const totalD = numBoardsZ * TRAY_SIZE
-      const px = -totalW / 2 + x * TRAY_SIZE
-      const pz = -totalD / 2 + z * TRAY_SIZE
-      const m = new THREE.Matrix4()
-      m.makeTranslation(px, 0, pz)
-      trayInstances.push(m)
-    }
-  }
-  trays.push({
-    name: "Board",
-    color: TRAY_COLOR,
-    geometry: masterAssets.base,
-    instances: trayInstances
-  })
+  const bbox = masterAssets.base.boundingBox!
+  const cx = (bbox.max.x + bbox.min.x) / 2
+  const cz = (bbox.max.z + bbox.min.z) / 2
+  
+  const textDepth = 0.6 // Use 0.6 to give 0.3mm embossing/debossing
+  const fontSize = layout.tileSize * 0.4
+  const floorThickness = layout.baseHeight - layout.pocketDepth
+  const ty = floorThickness // Centers the text exactly on the floor surface
+  const textOp = embossing === "raised" ? ADDITION : SUBTRACTION
 
-  // --- Text Indicators (optional) ---
+  // Pre-generate all text geometries for each placement in world space
+  const placementTexts: THREE.BufferGeometry[] = []
   if (embossing !== "none") {
-    const textDepth = 0.4
-    const fontSize = layout.tileSize * 0.4
-    const floorThickness = layout.baseHeight - layout.pocketDepth
-    const ty = embossing === "raised" ? floorThickness : floorThickness - textDepth + 0.05
-
     for (const [colorIndex, pal] of palette.entries()) {
       if (!pal.label) continue
       const textGeo = new TextGeometry(pal.label, {
         font, size: fontSize, height: textDepth, curveSegments: 2, bevelEnabled: false
       })
-      textGeo.computeBoundingBox()
-      const tbox = textGeo.boundingBox!
-      const tx = -(tbox.max.x - tbox.min.x) / 2
-      const tz = -(tbox.max.y - tbox.min.y) / 2
+      textGeo.center()
       textGeo.rotateX(-Math.PI / 2)
-
-      const indices = layout.placements
-        .map((p, i) => (p.colorIndex === colorIndex ? i : -1))
-        .filter((i) => i !== -1)
       
-      const textInstances: THREE.Matrix4[] = []
-      for (const i of indices) {
-        const p = layout.placements[i]
-        const m = new THREE.Matrix4()
-        m.makeTranslation(p.worldX + tx, ty, p.worldZ + tz)
-        textInstances.push(m)
-      }
+      layout.placements.forEach((p, i) => {
+        if (p.colorIndex === colorIndex) {
+          const tGeo = textGeo.clone()
+          tGeo.translate(p.worldX, ty, p.worldZ)
+          placementTexts[i] = tGeo
+        }
+      })
+    }
+  }
 
-      texts.push({
-        name: `Text_${pal.label}`,
-        color: "#ffffff",
-        geometry: textGeo,
-        instances: textInstances
+  // Generate Boards (CSG merged if text is present)
+  const baseNonIdx = masterAssets.base.index ? masterAssets.base.toNonIndexed() : masterAssets.base.clone()
+  const localEvaluator = new Evaluator()
+  localEvaluator.useGroups = false
+
+  for (let x = 0; x < numBoardsX; x++) {
+    for (let z = 0; z < numBoardsZ; z++) {
+      const totalW = numBoardsX * TRAY_SIZE
+      const totalD = numBoardsZ * TRAY_SIZE
+      const px = -totalW / 2 + (x * TRAY_SIZE) + (TRAY_SIZE / 2) - cx
+      const pz = -totalD / 2 + (z * TRAY_SIZE) + (TRAY_SIZE / 2) - cz
+      const mTray = new THREE.Matrix4()
+      mTray.makeTranslation(px, 0, pz)
+
+      let finalGeo = masterAssets.base
+      
+      if (embossing !== "none") {
+        // Find which texts fall into this tray's bounding box
+        const minX = px + cx - TRAY_SIZE / 2 - 1
+        const maxX = px + cx + TRAY_SIZE / 2 + 1
+        const minZ = pz + cz - TRAY_SIZE / 2 - 1
+        const maxZ = pz + cz + TRAY_SIZE / 2 + 1
+        
+        const localTextGeos: THREE.BufferGeometry[] = []
+        layout.placements.forEach((p, i) => {
+          if (placementTexts[i] && p.worldX >= minX && p.worldX <= maxX && p.worldZ >= minZ && p.worldZ <= maxZ) {
+            localTextGeos.push(placementTexts[i])
+          }
+        })
+        
+        if (localTextGeos.length > 0) {
+          const textMerged = mergeBufferGeometries(localTextGeos)
+          if (textMerged) {
+            const textBrush = new Brush(textMerged)
+            textBrush.updateMatrixWorld()
+            
+            const baseBrush = new Brush(baseNonIdx)
+            baseBrush.applyMatrix4(mTray)
+            baseBrush.updateMatrixWorld()
+            
+            const result = localEvaluator.evaluate(baseBrush, textBrush, textOp)
+            
+            // Revert back to local origin so the instance matrix works seamlessly
+            const invTray = mTray.clone().invert()
+            result.geometry.applyMatrix4(invTray)
+            result.geometry.computeVertexNormals()
+            finalGeo = result.geometry
+          }
+        }
+      }
+      
+      trays.push({
+        name: numBoardsX * numBoardsZ === 1 ? "Board" : `Board_${x + 1}_${z + 1}`,
+        color: TRAY_COLOR,
+        geometry: finalGeo,
+        instances: [mTray],
       })
     }
   }
@@ -157,10 +189,9 @@ export async function assembleExportAssets(
         const localIdx = idx % maxPerPlate
         const col = localIdx % 30
         const row = Math.floor(localIdx / 30)
-        m.makeTranslation(col * layout.pitch, 0, row * layout.pitch)
+        m.makeTranslation(col * layout.pitch, 3.6, row * layout.pitch)
       } else {
-        const offset = -7.8 / 2
-        m.makeTranslation(p.worldX + offset, floorY, p.worldZ + offset)
+        m.makeTranslation(p.worldX, floorY + 3.6, p.worldZ)
       }
       tileInstances.push(m)
     }
@@ -501,17 +532,41 @@ export async function build3MFZip(assets: ExportAssets): Promise<Blob> {
   const zip = new JSZip()
   
   // Base trays
-  if (assets.trays.length === 1) {
-    const meshes = [bakeInstances(assets.trays[0])]
-    if (assets.texts[0]) meshes.push(bakeInstances(assets.texts[0]))
-    const base3mf = await buildBaked3MF(meshes)
-    zip.file("1_Plate_Board.3mf", base3mf)
-  } else {
-    for (let i = 0; i < assets.trays.length; i++) {
-      const meshes = [bakeInstances(assets.trays[i])]
-      if (assets.texts[i]) meshes.push(bakeInstances(assets.texts[i]))
+  if (assets.trays.length > 0) {
+    const trayExport = assets.trays[0]
+    for (let i = 0; i < trayExport.instances.length; i++) {
+      const m = trayExport.instances[i]
+      const tx = m.elements[12]
+      const tz = m.elements[14]
+      
+      const minX = tx - 112 - 1
+      const maxX = tx + 112 + 1
+      const minZ = tz - 112 - 1
+      const maxZ = tz + 112 + 1
+      
+      const localTexts: InstancedExport[] = []
+      for (const textGrp of assets.texts) {
+        const localInstances: THREE.Matrix4[] = []
+        for (const tm of textGrp.instances) {
+          const ttx = tm.elements[12]
+          const ttz = tm.elements[14]
+          if (ttx >= minX && ttx <= maxX && ttz >= minZ && ttz <= maxZ) {
+            localInstances.push(tm)
+          }
+        }
+        if (localInstances.length > 0) {
+          localTexts.push({ ...textGrp, instances: localInstances })
+        }
+      }
+      
+      const meshes: BakedMesh[] = [bakeInstances({ ...trayExport, instances: [m] })]
+      for (const textGrp of localTexts) {
+        meshes.push(bakeInstances(textGrp))
+      }
+      
       const base3mf = await buildBaked3MF(meshes)
-      zip.file(`1_Plate_Board_${i + 1}.3mf`, base3mf)
+      const label = trayExport.instances.length === 1 ? "1_Plate_Board.3mf" : `1_Plate_Board_${i + 1}.3mf`
+      zip.file(label, base3mf)
     }
   }
   

@@ -57,11 +57,10 @@ export interface DownscaledImage {
  * Center-crop "cover" downscale using strict nearest-neighbor sampling.
  * The source is cropped to a centered square then sampled into a size x size grid.
  */
-export function coverCropDownscale(image: ImageData, maxSize: number): DownscaledImage {
+export function exactResample(image: ImageData, targetWidth: number, targetHeight: number): DownscaledImage {
   const { width: sw, height: sh, data } = image
-  const scale = maxSize / Math.max(sw, sh)
-  const outWidth = Math.max(1, Math.round(sw * scale))
-  const outHeight = Math.max(1, Math.round(sh * scale))
+  const outWidth = targetWidth
+  const outHeight = targetHeight
   const out = new Uint8ClampedArray(outWidth * outHeight * 3)
 
   for (let gy = 0; gy < outHeight; gy++) {

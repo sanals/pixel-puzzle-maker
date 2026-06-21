@@ -30,6 +30,7 @@ export interface GridLayout {
   pocketDepth: number
   boardWidth: number
   boardDepth: number
+  basePlateSize: number
   placements: CellPlacement[]
 }
 
@@ -48,30 +49,33 @@ export function computeLayout(matrix: VoxelMatrix, config: PuzzleConfig): GridLa
   const height = matrix.height
   const honeycomb = isHoneycomb(config.tileShape)
 
-  // Lock pitch to the master STL dimensions (224mm / 24 pockets = 9.3333mm)
-  const pitch = 224.0 / 24.0
+  // Lock pitch to the master STL dimensions (8.75mm for both 16x16 and 24x24)
+  const pitch = 8.75
   const tileSize = 7.8 // Master block STL size
   
   // These are roughly inferred from the STLs for visualization purposes
   const baseHeight = 9.4 
   const tileHeight = 7.2
-  const pocketDepth = 6.0 
+  const pocketDepth = 4.6 
 
   const rowStep = pitch
   const colStep = pitch
 
   const spanX = (width - 1) * colStep + (honeycomb ? pitch / 2 : 0)
   const spanZ = (height - 1) * rowStep
-  const halfX = spanX / 2
-  const halfZ = spanZ / 2
+  
+  // Because the resolution is strictly locked to multiples of the basePlateSize,
+  // we do not need the half-pitch snapping hack anymore.
+  let alignX = spanX / 2
+  let alignZ = spanZ / 2
 
   const placements: CellPlacement[] = []
   for (let gy = 0; gy < height; gy++) {
     const rowShift = honeycomb && gy % 2 === 1 ? pitch / 2 : 0
-    const worldZ = gy * rowStep - halfZ
+    const worldZ = gy * rowStep - alignZ
     for (let gx = 0; gx < width; gx++) {
       const cell = matrix.cells[gx][gy]
-      const worldX = gx * colStep + rowShift - halfX
+      const worldX = gx * colStep + rowShift - alignX
       placements.push({
         gx,
         gy,
@@ -96,6 +100,7 @@ export function computeLayout(matrix: VoxelMatrix, config: PuzzleConfig): GridLa
     pocketDepth,
     boardWidth,
     boardDepth,
+    basePlateSize: config.basePlateSize,
     placements,
   }
 }

@@ -4,8 +4,29 @@ export type TileShape = "square" | "cylinder" | "hexagon" | "heart"
 
 export type EmbossingStyle = "none" | "raised" | "recessed"
 
-export const GRID_SIZES = [24, 48, 72, 96, 120] as const
-export type GridSize = (typeof GRID_SIZES)[number]
+export interface CropRatio {
+  id: string
+  label: string
+  w: number
+  h: number
+}
+
+export const CROP_RATIOS: CropRatio[] = [
+  { id: "1:1", label: "1:1", w: 1, h: 1 },
+  { id: "1:2", label: "1:2", w: 1, h: 2 },
+  { id: "1:3", label: "1:3", w: 1, h: 3 },
+  { id: "1:4", label: "1:4", w: 1, h: 4 },
+  { id: "2:3", label: "2:3", w: 2, h: 3 },
+  { id: "3:4", label: "3:4", w: 3, h: 4 },
+  { id: "2:1", label: "2:1", w: 2, h: 1 },
+  { id: "3:1", label: "3:1", w: 3, h: 1 },
+  { id: "4:1", label: "4:1", w: 4, h: 1 },
+  { id: "3:2", label: "3:2", w: 3, h: 2 },
+  { id: "4:3", label: "4:3", w: 4, h: 3 },
+]
+
+export type BasePlateSize = 16 | 24
+export type ScaleMultiplier = 1 | 2 | 3 | 4
 
 export const MIN_COLORS = 2
 export const MAX_COLORS = 6
@@ -60,9 +81,10 @@ export const PRINTER_BEDS: PrinterBed[] = [
   { id: "custom", name: "Custom", width: 200, depth: 200 },
 ]
 
-/** Complete manufacturing configuration coming from the control panel. */
 export interface PuzzleConfig {
-  gridSize: GridSize
+  basePlateSize: BasePlateSize
+  resolutionMultiplier: ScaleMultiplier
+  cropRatio: CropRatio
   colorCount: number
   tileShape: TileShape
   embossing: EmbossingStyle
@@ -74,7 +96,9 @@ export interface PuzzleConfig {
 }
 
 export const DEFAULT_CONFIG: PuzzleConfig = {
-  gridSize: 48,
+  basePlateSize: 24,
+  resolutionMultiplier: 1,
+  cropRatio: CROP_RATIOS[0],
   colorCount: 4,
   tileShape: "square",
   embossing: "raised",
@@ -88,7 +112,8 @@ export const DEFAULT_CONFIG: PuzzleConfig = {
 export interface ProcessRequest {
   type: "process"
   imageData: ImageData
-  gridSize: number
+  width: number
+  height: number
   colorCount: number
 }
 

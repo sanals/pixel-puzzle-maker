@@ -30,7 +30,7 @@ interface PuzzleContextValue {
   layout: GridLayout | null
   split: SplitPlan | null
   config: PuzzleConfig
-  loadFile: (file: File) => void
+  loadCroppedImage: (url: string, fileName: string) => void
   updateConfig: (patch: Partial<PuzzleConfig>) => void
   reset: () => void
 }
@@ -78,23 +78,31 @@ export function PuzzleProvider({ children }: { children: React.ReactNode }) {
     if (!imageData || !workerRef.current) return
     requestId.current += 1
     setProcessing(true)
+    
+    const w = config.resolutionMultiplier * config.basePlateSize * config.cropRatio.w
+    const h = config.resolutionMultiplier * config.basePlateSize * config.cropRatio.h
+    
     workerRef.current.postMessage({
       type: "process",
       imageData,
-      gridSize: config.gridSize,
+      width: w,
+      height: h,
       colorCount: config.colorCount,
     })
-  }, [imageData, config.gridSize, config.colorCount])
+  }, [
+    imageData, 
+    config.resolutionMultiplier, 
+    config.basePlateSize, 
+    config.cropRatio.w, 
+    config.cropRatio.h, 
+    config.colorCount
+  ])
 
-  const loadFile = useCallback((file: File) => {
-    if (!file.type.match(/image\/(png|jpeg|jpg)/)) {
-      console.log("[v0] rejected non png/jpeg file:", file.type)
-      return
-    }
-    setFileName(file.name)
-    const url = URL.createObjectURL(file)
+  const loadCroppedImage = useCallback((url: string, fileNameStr: string) => {
+    setFileName(fileNameStr)
     setImageUrl((prev) => {
-      if (prev) URL.revokeObjectURL(prev)
+      // Don't revoke if it's not a blob URL, but just in case
+      if (prev && prev.startsWith("blob:")) URL.revokeObjectURL(prev)
       return url
     })
 
@@ -158,7 +166,7 @@ export function PuzzleProvider({ children }: { children: React.ReactNode }) {
     layout,
     split,
     config,
-    loadFile,
+    loadCroppedImage,
     updateConfig,
     reset,
   }

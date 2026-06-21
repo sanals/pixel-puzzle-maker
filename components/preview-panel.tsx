@@ -46,7 +46,7 @@ export function PreviewPanel() {
               </span>
             )}
             <span>
-              {config.gridSize}² grid · {dims}
+              {config.resolutionMultiplier * config.basePlateSize * config.cropRatio.w}×{config.resolutionMultiplier * config.basePlateSize * config.cropRatio.h} grid · {dims}
             </span>
           </div>
         </div>

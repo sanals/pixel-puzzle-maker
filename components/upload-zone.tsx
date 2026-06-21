@@ -8,24 +8,19 @@ import "react-image-crop/dist/ReactCrop.css"
 import { Button } from "@/components/ui/button"
 import { usePuzzle } from "@/components/puzzle-context"
 import { cn } from "@/lib/utils"
+import { CropModal } from "./crop-modal"
+import { type CropRatio } from "@/lib/types"
 
 export function UploadZone() {
-  const { loadFile, fileName, imageUrl, reset } = usePuzzle()
+  const { loadCroppedImage, fileName, imageUrl, updateConfig, reset } = usePuzzle()
   const inputRef = useRef<HTMLInputElement>(null)
-  const imgRef = useRef<HTMLImageElement>(null)
 
   const [dragging, setDragging] = useState(false)
   const [cropFile, setCropFile] = useState<File | null>(null)
-  const [cropUrl, setCropUrl] = useState<string>("")
-  const [crop, setCrop] = useState<Crop>()
-  const [completedCrop, setCompletedCrop] = useState<PixelCrop>()
 
   const handleSelectedFile = useCallback((file: File) => {
     if (!file.type.match(/image\/(png|jpeg|jpg)/)) return
     setCropFile(file)
-    setCropUrl(URL.createObjectURL(file))
-    setCrop(undefined)
-    setCompletedCrop(undefined)
   }, [])
 
   const onDrop = useCallback(
@@ -38,73 +33,26 @@ export function UploadZone() {
     [handleSelectedFile],
   )
 
-  const confirmCrop = useCallback(() => {
-    if (completedCrop && completedCrop.width > 0 && completedCrop.height > 0 && imgRef.current && cropFile) {
-      const img = imgRef.current
-      const canvas = document.createElement("canvas")
-      const scaleX = img.naturalWidth / img.width
-      const scaleY = img.naturalHeight / img.height
-      canvas.width = completedCrop.width * scaleX
-      canvas.height = completedCrop.height * scaleY
-      const ctx = canvas.getContext("2d")
-      if (ctx) {
-        ctx.drawImage(
-          img,
-          completedCrop.x * scaleX,
-          completedCrop.y * scaleY,
-          completedCrop.width * scaleX,
-          completedCrop.height * scaleY,
-          0,
-          0,
-          canvas.width,
-          canvas.height
-        )
-        canvas.toBlob((blob) => {
-          if (blob) {
-            const newFile = new File([blob], cropFile.name, { type: cropFile.type })
-            loadFile(newFile)
-            setCropUrl("")
-            setCropFile(null)
-          }
-        }, cropFile.type)
-        return
-      }
-    }
-    // Bypass crop if no area selected
+  const handleCropComplete = useCallback((dataUrl: string, ratio: CropRatio) => {
     if (cropFile) {
-      loadFile(cropFile)
-      setCropUrl("")
+      updateConfig({ cropRatio: ratio })
+      loadCroppedImage(dataUrl, cropFile.name)
       setCropFile(null)
     }
-  }, [completedCrop, cropFile, loadFile])
+  }, [cropFile, loadCroppedImage, updateConfig])
+
+  const handleCropCancel = useCallback(() => {
+    setCropFile(null)
+  }, [])
 
   return (
     <>
-      {cropUrl && (
-        <div className="fixed inset-0 z-50 flex flex-col items-center justify-center bg-black/80 p-4 backdrop-blur-sm">
-          <div className="flex max-h-[90vh] max-w-[90vw] flex-col gap-4 rounded-xl bg-card p-4 shadow-xl">
-            <div className="flex items-center justify-between">
-              <h2 className="text-lg font-semibold">Frame your image</h2>
-              <span className="text-xs text-muted-foreground">Select an area or use full image</span>
-            </div>
-            <div className="overflow-auto rounded-lg bg-black/20">
-              <ReactCrop
-                crop={crop}
-                onChange={(c) => setCrop(c)}
-                onComplete={(c) => setCompletedCrop(c)}
-              >
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img ref={imgRef} src={cropUrl} alt="Crop preview" className="max-h-[60vh] object-contain" />
-              </ReactCrop>
-            </div>
-            <div className="flex justify-end gap-2">
-              <Button variant="outline" onClick={() => { setCropUrl(""); setCropFile(null) }}>Cancel</Button>
-              <Button onClick={confirmCrop}>
-                {completedCrop?.width ? "Confirm Crop" : "Use Full Image"}
-              </Button>
-            </div>
-          </div>
-        </div>
+      {cropFile && (
+        <CropModal
+          file={cropFile}
+          onCancel={handleCropCancel}
+          onComplete={handleCropComplete}
+        />
       )}
 
       <div className="flex flex-col gap-2">

@@ -1,7 +1,7 @@
 // Phase 2: Dedicated Web Worker. Runs downscale + quantization off the UI thread.
 /// <reference lib="webworker" />
 
-import { buildMatrix, coverCropDownscale } from "./image-processing"
+import { buildMatrix, exactResample } from "./image-processing"
 import type { ProcessRequest, WorkerOutbound } from "./types"
 
 const ctx = self as unknown as DedicatedWorkerGlobalScope
@@ -11,7 +11,7 @@ ctx.addEventListener("message", (event: MessageEvent<ProcessRequest>) => {
   if (!data || data.type !== "process") return
 
   try {
-    const down = coverCropDownscale(data.imageData, data.gridSize)
+    const down = exactResample(data.imageData, data.width, data.height)
     const matrix = buildMatrix(down, data.colorCount)
     const message: WorkerOutbound = { type: "result", matrix }
     ctx.postMessage(message)
