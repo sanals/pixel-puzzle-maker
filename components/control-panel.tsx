@@ -9,8 +9,8 @@ import { UploadZone } from "@/components/upload-zone"
 import { Label } from "@/components/ui/label"
 import { Separator } from "@/components/ui/separator"
 import { Slider } from "@/components/ui/slider"
-import { Button } from "@/components/ui/button"
-import { MAX_COLORS, MIN_COLORS } from "@/lib/types"
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
+import { MAX_COLORS, MIN_COLORS, BasePlateSize } from "@/lib/types"
 
 export function ControlPanel() {
   const { config, updateConfig, hasImage, processing } = usePuzzle()
@@ -48,24 +48,17 @@ export function ControlPanel() {
             <Grid2x2 className="size-4 text-primary" aria-hidden="true" />
             Physical Base Plate
           </Label>
-        </div>
-        <div className="flex justify-between gap-2">
-          <Button 
-            variant={config.basePlateSize === 16 ? "default" : "outline"} 
-            size="sm"
-            onClick={() => updateConfig({ basePlateSize: 16, resolutionMultiplier: Math.min(config.resolutionMultiplier, maxMultiplier) as any })}
-            className={config.basePlateSize === 16 ? "bg-indigo-600 hover:bg-indigo-700 text-white w-full" : "w-full text-muted-foreground"}
+          <ToggleGroup 
+            size="sm" 
+            value={[config.basePlateSize.toString()]} 
+            onValueChange={(val: string[]) => {
+              if (val && val.length > 0) updateConfig({ basePlateSize: parseInt(val[0]) as BasePlateSize, resolutionMultiplier: Math.min(config.resolutionMultiplier, maxMultiplier) as any })
+            }}
+            className="border rounded-md p-0.5"
           >
-            16x16
-          </Button>
-          <Button 
-            variant={config.basePlateSize === 24 ? "default" : "outline"} 
-            size="sm"
-            onClick={() => updateConfig({ basePlateSize: 24, resolutionMultiplier: Math.min(config.resolutionMultiplier, maxMultiplier) as any })}
-            className={config.basePlateSize === 24 ? "bg-indigo-600 hover:bg-indigo-700 text-white w-full" : "w-full text-muted-foreground"}
-          >
-            24x24
-          </Button>
+            <ToggleGroupItem value="16" className="h-7 px-3 text-xs aria-pressed:bg-indigo-600 aria-pressed:text-white hover:aria-pressed:bg-indigo-600 hover:aria-pressed:text-white">16x16</ToggleGroupItem>
+            <ToggleGroupItem value="24" className="h-7 px-3 text-xs aria-pressed:bg-indigo-600 aria-pressed:text-white hover:aria-pressed:bg-indigo-600 hover:aria-pressed:text-white">24x24</ToggleGroupItem>
+          </ToggleGroup>
         </div>
 
         <div className="flex items-center justify-between mt-2">

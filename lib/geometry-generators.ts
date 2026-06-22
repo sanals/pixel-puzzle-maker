@@ -340,7 +340,10 @@ export async function buildPuzzleGroup(
     indices.forEach((idx, j) => {
       const p = layout.placements[idx]
       // The block is centered, so we must raise it by half its height (3.6mm) so its bottom rests on floorY
-      m.makeTranslation(p.worldX, floorY + 3.6, p.worldZ)
+      // We also rotate by 180 degrees around X to flip the block so the chamfer faces UP in the preview.
+      const mTrans = new THREE.Matrix4().makeTranslation(p.worldX, floorY + 3.6, p.worldZ)
+      const mRot = new THREE.Matrix4().makeRotationX(Math.PI)
+      m.multiplyMatrices(mTrans, mRot)
       inst.setMatrixAt(j, m)
     })
     inst.instanceMatrix.needsUpdate = true
