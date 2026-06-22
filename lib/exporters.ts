@@ -548,42 +548,19 @@ export async function build3MFZip(assets: ExportAssets): Promise<Blob> {
   const zip = new JSZip()
   
   // Base trays
-  if (assets.trays.length > 0) {
-    const trayExport = assets.trays[0]
-    for (let i = 0; i < trayExport.instances.length; i++) {
-      const m = trayExport.instances[i]
-      const tx = m.elements[12]
-      const tz = m.elements[14]
-      
-      const minX = tx - 112 - 1
-      const maxX = tx + 112 + 1
-      const minZ = tz - 112 - 1
-      const maxZ = tz + 112 + 1
-      
-      const localTexts: InstancedExport[] = []
-      for (const textGrp of assets.texts) {
-        const localInstances: THREE.Matrix4[] = []
-        for (const tm of textGrp.instances) {
-          const ttx = tm.elements[12]
-          const ttz = tm.elements[14]
-          if (ttx >= minX && ttx <= maxX && ttz >= minZ && ttz <= maxZ) {
-            localInstances.push(tm)
-          }
-        }
-        if (localInstances.length > 0) {
-          localTexts.push({ ...textGrp, instances: localInstances })
-        }
-      }
-      
-      const meshes: BakedMesh[] = [bakeInstances({ ...trayExport, instances: [m] })]
-      for (const textGrp of localTexts) {
-        meshes.push(bakeInstances(textGrp))
-      }
-      
-      const base3mf = await buildBaked3MF(meshes)
-      const label = trayExport.instances.length === 1 ? "1_Plate_Board.3mf" : `1_Plate_Board_${i + 1}.3mf`
-      zip.file(label, base3mf)
+  for (let i = 0; i < assets.trays.length; i++) {
+    const trayExport = assets.trays[i]
+    
+    const trayAssets: ExportAssets = {
+      trays: [trayExport],
+      tiles: [],
+      texts: [],
+      connectors: null,
     }
+    
+    const base3mf = await build3MF(trayAssets)
+    const label = `1_Plate_${trayExport.name}.3mf`
+    zip.file(label, base3mf)
   }
   
   // Tiles separated by color
@@ -592,14 +569,26 @@ export async function build3MFZip(assets: ExportAssets): Promise<Blob> {
     const maxPerPlate = 30 * 30
     
     if (t.instances.length <= maxPerPlate) {
-      const t3mf = await buildBaked3MF([bakeInstances(t)])
+      const tileAssets: ExportAssets = {
+        trays: [],
+        tiles: [t],
+        texts: [],
+        connectors: null,
+      }
+      const t3mf = await build3MF(tileAssets)
       zip.file(`2_Plate_Tiles_${t.color.replace("#", "")}.3mf`, t3mf)
     } else {
       let chunkIdx = 1
       for (let j = 0; j < t.instances.length; j += maxPerPlate) {
         const chunkInstances = t.instances.slice(j, j + maxPerPlate)
         const chunkExport: InstancedExport = { ...t, instances: chunkInstances }
-        const t3mf = await buildBaked3MF([bakeInstances(chunkExport)])
+        const tileAssets: ExportAssets = {
+          trays: [],
+          tiles: [chunkExport],
+          texts: [],
+          connectors: null,
+        }
+        const t3mf = await build3MF(tileAssets)
         zip.file(`2_Plate_Tiles_${t.color.replace("#", "")}_Part${chunkIdx}.3mf`, t3mf)
         chunkIdx++
       }
@@ -608,7 +597,13 @@ export async function build3MFZip(assets: ExportAssets): Promise<Blob> {
   
   // Connectors
   if (assets.connectors) {
-    const c3mf = await buildBaked3MF([bakeInstances(assets.connectors)])
+    const connectorAssets: ExportAssets = {
+      trays: [],
+      tiles: [],
+      texts: [],
+      connectors: assets.connectors,
+    }
+    const c3mf = await build3MF(connectorAssets)
     zip.file("3_Plate_Connectors.3mf", c3mf)
   }
   
