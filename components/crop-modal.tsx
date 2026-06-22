@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useRef, useEffect } from "react"
-import ReactCrop, { centerCrop, makeAspectCrop, type Crop, type PixelCrop } from "react-image-crop"
+import ReactCrop, { centerCrop, makeAspectCrop, convertToPixelCrop, type Crop, type PixelCrop } from "react-image-crop"
 import "react-image-crop/dist/ReactCrop.css"
 import { Button } from "@/components/ui/button"
 import { Slider } from "@/components/ui/slider"
@@ -48,13 +48,18 @@ export function CropModal({ file, onCancel, onComplete }: CropModalProps) {
 
   function onImageLoad(e: React.SyntheticEvent<HTMLImageElement>) {
     const { width, height } = e.currentTarget
-    setCrop(centerAspectCrop(width, height, selectedRatio.w / selectedRatio.h))
+    const initialCrop = centerAspectCrop(width, height, selectedRatio.w / selectedRatio.h)
+    setCrop(initialCrop)
+    setCompletedCrop(convertToPixelCrop(initialCrop, width, height))
   }
 
   function handleRatioChange(ratio: CropRatio) {
     setSelectedRatio(ratio)
     if (imgRef.current) {
-      setCrop(centerAspectCrop(imgRef.current.width, imgRef.current.height, ratio.w / ratio.h))
+      const { width, height } = imgRef.current
+      const newCrop = centerAspectCrop(width, height, ratio.w / ratio.h)
+      setCrop(newCrop)
+      setCompletedCrop(convertToPixelCrop(newCrop, width, height))
     }
   }
 
