@@ -57,7 +57,14 @@ export function ControlPanel() {
             className="border rounded-md p-0.5"
           >
             <ToggleGroupItem value="16" className="h-7 px-3 text-xs aria-pressed:bg-indigo-600 aria-pressed:text-white hover:aria-pressed:bg-indigo-600 hover:aria-pressed:text-white">16x16</ToggleGroupItem>
-            <ToggleGroupItem value="24" className="h-7 px-3 text-xs aria-pressed:bg-indigo-600 aria-pressed:text-white hover:aria-pressed:bg-indigo-600 hover:aria-pressed:text-white">24x24</ToggleGroupItem>
+            <ToggleGroupItem 
+              value="24" 
+              disabled={config.bedId === "bambu-mini"}
+              className="h-7 px-3 text-xs aria-pressed:bg-indigo-600 aria-pressed:text-white hover:aria-pressed:bg-indigo-600 hover:aria-pressed:text-white disabled:opacity-30 disabled:cursor-not-allowed"
+              title={config.bedId === "bambu-mini" ? "24x24 is too large for A1 Mini plates" : ""}
+            >
+              24x24
+            </ToggleGroupItem>
           </ToggleGroup>
         </div>
 

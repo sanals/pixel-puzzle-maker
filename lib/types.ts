@@ -75,9 +75,10 @@ export interface PrinterBed {
 }
 
 export const PRINTER_BEDS: PrinterBed[] = [
-  { id: "bambu-a1", name: "Bambu Lab 256 x 256", width: 256, depth: 256 },
-  { id: "prusa-mk4", name: "Prusa MK4 250 x 210", width: 250, depth: 210 },
-  { id: "ender-3", name: "Ender 3 220 x 220", width: 220, depth: 220 },
+  { id: "bambu-a1", name: "Bambu Lab Standard (256x256)", width: 256, depth: 256 },
+  { id: "bambu-mini", name: "Bambu Lab A1 mini (180x180)", width: 180, depth: 180 },
+  { id: "prusa-mk4", name: "Prusa MK4 (250x210)", width: 250, depth: 210 },
+  { id: "ender-3", name: "Ender 3 (220x220)", width: 220, depth: 220 },
   { id: "custom", name: "Custom", width: 200, depth: 200 },
 ]
 

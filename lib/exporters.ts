@@ -24,7 +24,7 @@ export interface InstancedExport {
 interface BakedMesh {
   name: string
   color: string
-  positions: number[] 
+  positions: number[]
 }
 
 /** Bounds of a subset of placements (cells within a sub-board range). */
@@ -64,7 +64,7 @@ export async function assembleExportAssets(
   palette: PaletteColor[],
   split: SplitPlan,
   embossing: EmbossingStyle,
-  options: { packTilesAtOrigin?: boolean } = {}
+  options: { packTilesAtOrigin?: boolean; bedWidth?: number } = {}
 ): Promise<ExportAssets> {
   const floorY = layout.baseHeight - layout.pocketDepth
   const tmp = new THREE.Matrix4()
@@ -78,11 +78,11 @@ export async function assembleExportAssets(
   const TRAY_SIZE = layout.basePlateSize * layout.pitch
   const numBoardsX = Math.ceil(layout.boardWidth / TRAY_SIZE)
   const numBoardsZ = Math.ceil(layout.boardDepth / TRAY_SIZE)
-  
+
   const bbox = masterAssets.base.boundingBox!
   const cx = (bbox.max.x + bbox.min.x) / 2
   const cz = (bbox.max.z + bbox.min.z) / 2
-  
+
   const textDepth = 0.6 // Use 0.6 to give 0.3mm embossing/debossing
   const fontSize = layout.tileSize * 0.4
   const floorThickness = layout.baseHeight - layout.pocketDepth
@@ -100,7 +100,7 @@ export async function assembleExportAssets(
       textGeo.deleteAttribute('uv')
       textGeo.center()
       textGeo.rotateX(-Math.PI / 2)
-      
+
       layout.placements.forEach((p, i) => {
         if (p.colorIndex === colorIndex) {
           const tGeo = textGeo.clone()
@@ -127,33 +127,33 @@ export async function assembleExportAssets(
       mTray.makeTranslation(px, 0, pz)
 
       let finalGeo = masterAssets.base
-      
+
       if (embossing !== "none") {
         // Find which texts fall into this tray's bounding box
         const minX = px + cx - TRAY_SIZE / 2 - 1
         const maxX = px + cx + TRAY_SIZE / 2 + 1
         const minZ = pz + cz - TRAY_SIZE / 2 - 1
         const maxZ = pz + cz + TRAY_SIZE / 2 + 1
-        
+
         const localTextGeos: THREE.BufferGeometry[] = []
         layout.placements.forEach((p, i) => {
           if (placementTexts[i] && p.worldX >= minX && p.worldX <= maxX && p.worldZ >= minZ && p.worldZ <= maxZ) {
             localTextGeos.push(placementTexts[i])
           }
         })
-        
+
         if (localTextGeos.length > 0) {
           const textMerged = mergeBufferGeometries(localTextGeos)
           if (textMerged) {
             const textBrush = new Brush(textMerged)
             textBrush.updateMatrixWorld()
-            
+
             const baseBrush = new Brush(baseNonIdx)
             baseBrush.applyMatrix4(mTray)
             baseBrush.updateMatrixWorld()
-            
+
             const result = localEvaluator.evaluate(baseBrush, textBrush, textOp)
-            
+
             // Revert back to local origin so the instance matrix works seamlessly
             const invTray = mTray.clone().invert()
             result.geometry.applyMatrix4(invTray)
@@ -162,7 +162,7 @@ export async function assembleExportAssets(
           }
         }
       }
-      
+
       trays.push({
         name: numBoardsX * numBoardsZ === 1 ? "Board" : `Board_${x + 1}_${z + 1}`,
         color: TRAY_COLOR,
@@ -174,7 +174,10 @@ export async function assembleExportAssets(
 
   // --- Tiles ---
   const tiles: InstancedExport[] = []
-  const MAX_COLS = 26 // 26 * 8.75 = 227.5mm (comfortably fits on 256x256 plate)
+  const bedWidth = options.bedWidth || 256
+  // Leave ~25mm safety margin for prime lines and purge tower space
+  const maxSafeWidth = bedWidth - 25
+  const MAX_COLS = Math.max(1, Math.floor(maxSafeWidth / layout.pitch))
   const MAX_PER_PLATE = MAX_COLS * MAX_COLS
 
   for (const [colorIndex, pal] of palette.entries()) {
@@ -187,7 +190,7 @@ export async function assembleExportAssets(
     for (let chunkStart = 0; chunkStart < indices.length; chunkStart += MAX_PER_PLATE) {
       const chunkIndices = indices.slice(chunkStart, chunkStart + MAX_PER_PLATE)
       const tileInstances: THREE.Matrix4[] = []
-      
+
       const numCols = Math.min(MAX_COLS, chunkIndices.length)
       const numRows = Math.ceil(chunkIndices.length / MAX_COLS)
       const totalW = (numCols - 1) * layout.pitch
@@ -198,7 +201,7 @@ export async function assembleExportAssets(
       for (let localIdx = 0; localIdx < chunkIndices.length; localIdx++) {
         const p = layout.placements[chunkIndices[localIdx]]
         const m = new THREE.Matrix4()
-        
+
         if (options.packTilesAtOrigin) {
           const col = localIdx % MAX_COLS
           const row = Math.floor(localIdx / MAX_COLS)
@@ -249,7 +252,7 @@ function bakeInstances(exp: InstancedExport): BakedMesh {
   const geo = exp.geometry.index ? exp.geometry.toNonIndexed() : exp.geometry.clone()
   const pos = geo.getAttribute("position")
   const baked: BakedMesh = { name: exp.name, color: exp.color, positions: [] }
-  
+
   for (const matrix of exp.instances) {
     const g = geo.clone()
     g.applyMatrix4(matrix)
@@ -309,34 +312,42 @@ function hexToTriplet(hex: string): string {
 }
 
 function generateUUID() {
-  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function (c) {
     const r = Math.random() * 16 | 0, v = c === 'x' ? r : (r & 0x3 | 0x8);
     return v.toString(16);
   });
 }
 
 /** Build a multi-material .3MF (zip + XML) with native per-object color materials. */
-export async function build3MF(assets: ExportAssets): Promise<Blob> {
+export async function build3MF(assets: ExportAssets, options: { bedWidth?: number, bedId?: string } = {}): Promise<Blob> {
   const { bambuProjectSettings } = await import("./bambu-project-settings");
   const zip = new JSZip()
   const groups = [...assets.trays, ...assets.tiles, ...assets.texts]
   if (assets.connectors) groups.push(assets.connectors)
 
-  const colorEntries = groups
-    .map((g) => `      <m:color color="${hexToTriplet(g.color)}"/>`)
+  const uniqueColors: string[] = []
+  groups.forEach(g => {
+    if (!uniqueColors.includes(g.color)) {
+      uniqueColors.push(g.color)
+    }
+  })
+
+  const colorEntries = uniqueColors
+    .map((c) => `      <m:color color="${hexToTriplet(c)}"/>`)
     .join("\n")
 
   const objects: string[] = []
   const buildItems: string[] = []
-  
+
   const modelSettingsObjects: string[] = []
   const plateConfigs: string[] = []
 
-  const PLATE_SPACING = 307.2
-  
+  const plateSize = options.bedWidth || 256
+  const PLATE_SPACING = plateSize * 1.2
+
   const numPlates = groups.length
   const columns = Math.ceil(Math.sqrt(numPlates))
-  
+
   let nextObjectId = 2 // 1 is reserved for basematerials
 
   groups.forEach((grp, plateIdx) => {
@@ -346,7 +357,7 @@ export async function build3MF(assets: ExportAssets): Promise<Blob> {
     let minY = Infinity, maxY = -Infinity
     let minZ = Infinity, maxZ = -Infinity
     const p = grp.geometry.index ? grp.geometry.toNonIndexed().getAttribute("position") : grp.geometry.getAttribute("position")
-    
+
     for (let i = 0; i < p.count; i++) {
       for (const m of grp.instances) {
         const v = new THREE.Vector3(p.getX(i), p.getY(i), p.getZ(i))
@@ -359,22 +370,22 @@ export async function build3MF(assets: ExportAssets): Promise<Blob> {
         maxZ = Math.max(maxZ, v.y)
       }
     }
-    
+
     const cx = (minX + maxX) / 2
     const cy = (minY + maxY) / 2
-    
+
     const templateId = nextObjectId++
-    
+
     const verts: string[] = []
     const tris: string[] = []
-    
+
     for (let i = 0; i < p.count; i++) {
-       verts.push(`<vertex x="${fmt(p.getX(i))}" y="${fmt(-p.getZ(i))}" z="${fmt(p.getY(i))}"/>`)
+      verts.push(`<vertex x="${fmt(p.getX(i))}" y="${fmt(-p.getZ(i))}" z="${fmt(p.getY(i))}"/>`)
     }
     for (let v = 0; v < p.count; v += 3) {
       tris.push(`<triangle v1="${v}" v2="${v + 1}" v3="${v + 2}" pid="1" p1="${plateIdx}"/>`)
     }
-    
+
     objects.push(
       `    <object id="${templateId}" type="model">\n` +
       `      <mesh>\n` +
@@ -383,23 +394,23 @@ export async function build3MF(assets: ExportAssets): Promise<Blob> {
       `      </mesh>\n` +
       `    </object>`
     )
-    
+
     const masterId = nextObjectId++
     const componentTags: string[] = []
-    
+
     for (const m of grp.instances) {
       const e = m.elements
       const tx = e[12]
       const ty = e[13]
       const tz = e[14]
-      
+
       const item_tx = tx - cx
       const item_ty = -tz - cy
       const item_tz = ty
-      
+
       componentTags.push(`        <component objectid="${templateId}" transform="1 0 0 0 1 0 0 0 1 ${fmt(item_tx)} ${fmt(item_ty)} ${fmt(item_tz)}"/>`)
     }
-    
+
     objects.push(
       `    <object id="${masterId}" p:UUID="${generateUUID()}" type="model">\n` +
       `      <components>\n` +
@@ -407,20 +418,21 @@ export async function build3MF(assets: ExportAssets): Promise<Blob> {
       `\n      </components>\n` +
       `    </object>`
     )
-    
+
     const globalX = col * PLATE_SPACING
     const globalY = -row * PLATE_SPACING
-    buildItems.push(`    <item objectid="${masterId}" p:UUID="${generateUUID()}" transform="1 0 0 0 1 0 0 0 1 ${globalX + 128} ${globalY + 128} 0" printable="1"/>`)
-    
+    buildItems.push(`    <item objectid="${masterId}" p:UUID="${generateUUID()}" transform="1 0 0 0 1 0 0 0 1 ${globalX + plateSize / 2} ${globalY + plateSize / 2} 0" printable="1"/>`)
+
     const cleanName = grp.name.replace(/[^a-zA-Z0-9_\- ]/g, "")
-    
+
+    const extruderIndex = uniqueColors.indexOf(grp.color) + 1
     modelSettingsObjects.push(`
   <object id="${masterId}">
     <metadata key="name" value="${cleanName}"/>
-    <metadata key="extruder" value="${plateIdx + 1}"/>
+    <metadata key="extruder" value="${extruderIndex}"/>
     <part id="${templateId}" subtype="normal_part">
       <metadata key="name" value="${cleanName}"/>
-      <metadata key="matrix" value="1 0 0 128 0 1 0 128 0 0 1 0 0 0 0 1"/>
+      <metadata key="matrix" value="1 0 0 ${plateSize / 2} 0 1 0 ${plateSize / 2} 0 0 1 0 0 0 0 1"/>
       <metadata key="source_file" value="${cleanName}.model"/>
       <metadata key="source_object_id" value="0"/>
       <metadata key="source_volume_id" value="0"/>
@@ -455,7 +467,7 @@ export async function build3MF(assets: ExportAssets): Promise<Blob> {
     `  <resources>\n`,
     `    <m:colorgroup id="1">\n${colorEntries}\n    </m:colorgroup>\n`
   )
-  
+
   for (const obj of objects) {
     modelChunks.push(obj, "\n")
   }
@@ -465,7 +477,7 @@ export async function build3MF(assets: ExportAssets): Promise<Blob> {
     `  <build>\n${buildItems.join("\n")}\n  </build>\n`,
     `</model>\n`
   )
-  
+
   const modelBlob = new Blob(modelChunks, { type: "text/xml" })
 
   const modelSettingsXml = `<?xml version="1.0" encoding="UTF-8"?>
@@ -475,9 +487,17 @@ export async function build3MF(assets: ExportAssets): Promise<Blob> {
 </config>`
 
   const baseConfig = JSON.parse(bambuProjectSettings)
-  baseConfig["printer_model"] = "Bambu Lab A1"
-  baseConfig["printer_settings_id"] = "Bambu Lab A1 0.4 nozzle"
-  baseConfig["default_print_profile"] = "0.20mm Standard @BBL A1"
+
+  if (options.bedId === "bambu-mini") {
+    baseConfig["printer_model"] = "Bambu Lab A1 mini"
+    baseConfig["printer_settings_id"] = "Bambu Lab A1 mini 0.4 nozzle"
+    baseConfig["default_print_profile"] = "0.20mm Standard @BBL A1M"
+  } else {
+    baseConfig["printer_model"] = "Bambu Lab A1"
+    baseConfig["printer_settings_id"] = "Bambu Lab A1 0.4 nozzle"
+    baseConfig["default_print_profile"] = "0.20mm Standard @BBL A1"
+  }
+
   const projectSettingsXml = JSON.stringify(baseConfig, null, 2)
 
   const sliceInfoXml = `<?xml version="1.0" encoding="UTF-8"?>
@@ -508,11 +528,11 @@ export async function build3MF(assets: ExportAssets): Promise<Blob> {
   zip.file("[Content_Types].xml", contentTypes)
   zip.folder("_rels")!.file(".rels", rels)
   zip.folder("3D")!.file("3dmodel.model", modelBlob)
-  
+
   zip.folder("Metadata")!.file("model_settings.config", modelSettingsXml)
   zip.folder("Metadata")!.file("project_settings.config", projectSettingsXml)
   zip.folder("Metadata")!.file("slice_info.config", sliceInfoXml)
-  
+
   return zip.generateAsync({ type: "blob", mimeType: "model/3mf" })
 }
 
@@ -562,10 +582,10 @@ async function buildBaked3MF(meshes: BakedMesh[]): Promise<Blob> {
   for (const m of meshes) {
     const p = m.positions
     for (let i = 0; i < p.length; i += 9) {
-      verts.push(`<vertex x="${fmt(p[i])}" y="${fmt(p[i+1])}" z="${fmt(p[i+2])}"/>`)
-      verts.push(`<vertex x="${fmt(p[i+3])}" y="${fmt(p[i+4])}" z="${fmt(p[i+5])}"/>`)
-      verts.push(`<vertex x="${fmt(p[i+6])}" y="${fmt(p[i+7])}" z="${fmt(p[i+8])}"/>`)
-      tris.push(`<triangle v1="${vertIndex}" v2="${vertIndex+1}" v3="${vertIndex+2}" pid="1" p1="0"/>`)
+      verts.push(`<vertex x="${fmt(p[i])}" y="${fmt(p[i + 1])}" z="${fmt(p[i + 2])}"/>`)
+      verts.push(`<vertex x="${fmt(p[i + 3])}" y="${fmt(p[i + 4])}" z="${fmt(p[i + 5])}"/>`)
+      verts.push(`<vertex x="${fmt(p[i + 6])}" y="${fmt(p[i + 7])}" z="${fmt(p[i + 8])}"/>`)
+      tris.push(`<triangle v1="${vertIndex}" v2="${vertIndex + 1}" v3="${vertIndex + 2}" pid="1" p1="0"/>`)
       vertIndex += 3
     }
   }
@@ -616,28 +636,28 @@ async function buildBaked3MF(meshes: BakedMesh[]): Promise<Blob> {
 /** Bundle 3MF files into a ZIP (ideal for printing color-by-color separated plates). */
 export async function build3MFZip(assets: ExportAssets): Promise<Blob> {
   const zip = new JSZip()
-  
+
   // Base trays
   for (let i = 0; i < assets.trays.length; i++) {
     const trayExport = assets.trays[i]
-    
+
     const trayAssets: ExportAssets = {
       trays: [trayExport],
       tiles: [],
       texts: [],
       connectors: null,
     }
-    
+
     const base3mf = await build3MF(trayAssets)
     const label = `1_Plate_${trayExport.name}.3mf`
     zip.file(label, base3mf)
   }
-  
+
   // Tiles separated by color
   for (let i = 0; i < assets.tiles.length; i++) {
     const t = assets.tiles[i]
     const maxPerPlate = 30 * 30
-    
+
     if (t.instances.length <= maxPerPlate) {
       const tileAssets: ExportAssets = {
         trays: [],
@@ -664,7 +684,7 @@ export async function build3MFZip(assets: ExportAssets): Promise<Blob> {
       }
     }
   }
-  
+
   // Connectors
   if (assets.connectors) {
     const connectorAssets: ExportAssets = {
@@ -676,7 +696,7 @@ export async function build3MFZip(assets: ExportAssets): Promise<Blob> {
     const c3mf = await build3MF(connectorAssets)
     zip.file("3_Plate_Connectors.3mf", c3mf)
   }
-  
+
   return zip.generateAsync({ type: "blob" })
 }
 

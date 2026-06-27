@@ -52,7 +52,13 @@ export function PrintConfig() {
               <Label className="text-xs font-medium text-muted-foreground">Printer Bed</Label>
               <Select
                 value={config.bedId}
-                onValueChange={(v) => updateConfig({ bedId: v || "bambu-mini" })}
+                onValueChange={(v) => {
+                  const payload: any = { bedId: v || "bambu-mini" }
+                  if (v === "bambu-mini") {
+                    payload.basePlateSize = 16
+                  }
+                  updateConfig(payload)
+                }}
                 disabled={disabled}
               >
                 <SelectTrigger className="h-9">

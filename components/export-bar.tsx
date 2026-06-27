@@ -21,9 +21,13 @@ export function ExportBar() {
     if (disabled) return
     setBusy("3mf")
     const id = toast.loading("Building multi-color 3MF…")
+    
+    // Yield to the event loop so the UI has time to paint the loading toast before heavy sync work begins
+    await new Promise(resolve => setTimeout(resolve, 50))
+    
     try {
-      const assets = await assembleExportAssets(layout!, matrix!.palette, split!, config.embossing, { packTilesAtOrigin: true })
-      const blob = await build3MF(assets)
+      const assets = await assembleExportAssets(layout!, matrix!.palette, split!, config.embossing, { packTilesAtOrigin: true, bedWidth: config.bedWidth })
+      const blob = await build3MF(assets, { bedWidth: config.bedWidth, bedId: config.bedId })
       downloadBlob(blob, "pixel-puzzle.3mf")
       toast.success("Exported pixel-puzzle.3mf", {
         id,
@@ -41,8 +45,12 @@ export function ExportBar() {
     if (disabled) return
     setBusy("zip")
     const id = toast.loading("Packaging separated 3MF plates…")
+    
+    // Yield to the event loop so the UI has time to paint the loading toast before heavy sync work begins
+    await new Promise(resolve => setTimeout(resolve, 50))
+    
     try {
-      const assets = await assembleExportAssets(layout!, matrix!.palette, split!, config.embossing, { packTilesAtOrigin: true })
+      const assets = await assembleExportAssets(layout!, matrix!.palette, split!, config.embossing, { packTilesAtOrigin: true, bedWidth: config.bedWidth })
       const blob = await build3MFZip(assets)
       downloadBlob(blob, "pixel-puzzle-separated.zip")
       toast.success("Exported pixel-puzzle-separated.zip", {
