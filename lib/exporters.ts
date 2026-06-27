@@ -226,14 +226,23 @@ export async function assembleExportAssets(
   let connectors: InstancedExport | null = null
   if (split.connectorCount > 0 && masterAssets.connector) {
     const connectorInstances: THREE.Matrix4[] = []
-    const perRow = Math.ceil(Math.sqrt(split.connectorCount))
-    const gap = layout.pitch * 0.9
-    const startX = layout.boardWidth / 2 + layout.pitch * 2
+    const bbox = masterAssets.connector.boundingBox!
+    const sizeX = bbox.max.x - bbox.min.x
+    const sizeZ = bbox.max.z - bbox.min.z
+    const gapX = sizeX + 3
+    const gapZ = sizeZ + 3
+    
+    const bedWidth = options.bedWidth || 256
+    const maxSafeWidth = bedWidth - 25
+    const maxPerRow = Math.max(1, Math.floor(maxSafeWidth / gapX))
+    const actualPerRow = Math.min(split.connectorCount, maxPerRow)
+    
+    const startX = layout.boardWidth / 2 + gapX
     for (let i = 0; i < split.connectorCount; i++) {
-      const row = Math.floor(i / perRow)
-      const col = i % perRow
+      const row = Math.floor(i / actualPerRow)
+      const col = i % actualPerRow
       const m = new THREE.Matrix4()
-      m.makeTranslation(startX + col * gap, layout.pitch * 0.15, row * gap)
+      m.makeTranslation(startX + col * gapX, layout.pitch * 0.15, row * gapZ)
       connectorInstances.push(m)
     }
     connectors = {

@@ -32,122 +32,53 @@ export interface SplitPlan {
   reason: string
 }
 
-/**
- * Partition a 1D length into chunks no larger than `maxPer`, merging any
- * trailing remainder smaller than MIN_CHUNK into its neighbor to avoid slivers.
- */
-function splitAxis(total: number, maxPer: number): [number, number][] {
-  if (maxPer >= total) return [[0, total]]
-  const chunkCount = Math.ceil(total / maxPer)
-  const base = Math.floor(total / chunkCount)
-  let remainder = total - base * chunkCount
-
-  const sizes: number[] = []
-  for (let i = 0; i < chunkCount; i++) {
-    sizes.push(base + (remainder > 0 ? 1 : 0))
-    if (remainder > 0) remainder--
-  }
-  // Repair any sub-MIN_CHUNK slivers by borrowing from the largest neighbor.
-  for (let i = 0; i < sizes.length; i++) {
-    while (sizes[i] < MIN_CHUNK && sizes.length > 1) {
-      const donor = sizes.reduce(
-        (best, v, idx) => (idx !== i && v > sizes[best] ? idx : best),
-        i === 0 ? 1 : 0,
-      )
-      if (sizes[donor] - 1 < MIN_CHUNK) break
-      sizes[donor]--
-      sizes[i]++
-    }
-  }
-
-  const ranges: [number, number][] = []
-  let cursor = 0
-  for (const s of sizes) {
-    ranges.push([cursor, cursor + s])
-    cursor += s
-  }
-  return ranges
-}
-
 /** Evaluate the physical footprint against the bed and plan any splitting. */
 export function planBoardSplit(layout: GridLayout, config: PuzzleConfig): SplitPlan {
-  // Usable cells per bed axis, leaving a small safety border.
-  const usableW = config.bedWidth * 0.96
-  const usableD = config.bedDepth * 0.96
-  const maxCols = Math.max(MIN_CHUNK, Math.floor(usableW / layout.pitch))
-  const maxRows = Math.max(MIN_CHUNK, Math.floor(usableD / layout.pitch))
+  // Trays are ALWAYS full basePlateSize STLs
+  const maxCols = layout.basePlateSize
+  const maxRows = layout.basePlateSize
 
   const totalCols = Math.round(layout.boardWidth / layout.pitch)
   const totalRows = Math.round(layout.boardDepth / layout.pitch)
 
-  const colRanges = splitAxis(totalCols, maxCols)
-  const rowRanges = splitAxis(totalRows, maxRows)
-  const needsSplit = colRanges.length > 1 || rowRanges.length > 1
+  // Number of physical boards in X and Z
+  const numBoardsX = Math.ceil(totalCols / maxCols)
+  const numBoardsZ = Math.ceil(totalRows / maxRows)
+  const needsSplit = numBoardsX > 1 || numBoardsZ > 1
 
   const subBoards: SubBoard[] = []
-  for (let r = 0; r < rowRanges.length; r++) {
-    for (let c = 0; c < colRanges.length; c++) {
-      const [col0, col1] = colRanges[c]
-      const [row0, row1] = rowRanges[r]
+  for (let r = 0; r < numBoardsZ; r++) {
+    for (let c = 0; c < numBoardsX; c++) {
       subBoards.push({
         id: `board-r${r + 1}-c${c + 1}`,
-        col0,
-        col1,
-        row0,
-        row1,
-        cols: col1 - col0,
-        rows: row1 - row0,
+        col0: c * maxCols,
+        col1: Math.min((c + 1) * maxCols, totalCols),
+        row0: r * maxRows,
+        row1: Math.min((r + 1) * maxRows, totalRows),
+        cols: maxCols,
+        rows: maxRows,
       })
     }
   }
 
-  const connectorPositions: { x: number; z: number; rotated: boolean }[] = []
-  if (needsSplit) {
-    const halfX = (layout.boardWidth - layout.pitch) / 2
-    const halfZ = (layout.boardDepth - layout.pitch) / 2
-
-    // Vertical seams (connect left/right sub-boards)
-    for (let c = 1; c < colRanges.length; c++) {
-      const colIdx = colRanges[c][0]
-      const worldX = colIdx * layout.pitch - halfX - layout.pitch / 2
-      for (let r = 0; r < rowRanges.length; r++) {
-        const rowMid = (rowRanges[r][0] + rowRanges[r][1]) / 2
-        const worldZ = rowMid * layout.pitch - halfZ
-        // Place two connectors per seam for stability
-        connectorPositions.push({ x: worldX, z: worldZ - layout.pitch, rotated: false })
-        connectorPositions.push({ x: worldX, z: worldZ + layout.pitch, rotated: false })
-      }
-    }
-
-    // Horizontal seams (connect top/bottom sub-boards)
-    for (let r = 1; r < rowRanges.length; r++) {
-      const rowIdx = rowRanges[r][0]
-      const worldZ = rowIdx * layout.pitch - halfZ - layout.pitch / 2
-      for (let c = 0; c < colRanges.length; c++) {
-        const colMid = (colRanges[c][0] + colRanges[c][1]) / 2
-        const worldX = colMid * layout.pitch - halfX
-        connectorPositions.push({ x: worldX - layout.pitch, z: worldZ, rotated: true })
-        connectorPositions.push({ x: worldX + layout.pitch, z: worldZ, rotated: true })
-      }
-    }
-  }
-
-  const connectorCount = connectorPositions.length
+  // Count seams (touching edges) between the boards.
+  const verticalSeams = Math.max(0, numBoardsX - 1) * numBoardsZ
+  const horizontalSeams = Math.max(0, numBoardsZ - 1) * numBoardsX
+  const totalSeams = verticalSeams + horizontalSeams
+  
+  // The physical STLs have exactly 3 holes on every side.
+  const connectorCount = totalSeams * 3
 
   return {
     needsSplit,
-    gridCols: colRanges.length,
-    gridRows: rowRanges.length,
+    gridCols: numBoardsX,
+    gridRows: numBoardsZ,
     subBoards,
     connectorCount,
-    connectorPositions,
+    connectorPositions: [], // Obsolete, not used for export or UI
     reason: needsSplit
-      ? `Footprint ${Math.round(layout.boardWidth)}×${Math.round(
-          layout.boardDepth,
-        )}mm exceeds the ${config.bedWidth}×${config.bedDepth}mm bed.`
-      : `Footprint ${Math.round(layout.boardWidth)}×${Math.round(
-          layout.boardDepth,
-        )}mm fits the ${config.bedWidth}×${config.bedDepth}mm bed.`,
+      ? `Puzzle requires a ${numBoardsX}x${numBoardsZ} grid of ${layout.basePlateSize}x${layout.basePlateSize} bases.`
+      : `Puzzle fits on a single ${layout.basePlateSize}x${layout.basePlateSize} base.`
   }
 }
 
