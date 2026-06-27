@@ -500,7 +500,26 @@ export async function build3MF(assets: ExportAssets, options: { bedWidth?: numbe
     : ["#CCCCCCFF"]
 
   const baseConfig = JSON.parse(bambuProjectSettings)
+
+  const originalCount = baseConfig.filament_colour.length;
+  const newCount = Math.max(1, colorsArray.length);
+
+  for (const key of Object.keys(baseConfig)) {
+    if (Array.isArray(baseConfig[key]) && baseConfig[key].length === originalCount) {
+      if (newCount <= originalCount) {
+        baseConfig[key] = baseConfig[key].slice(0, newCount);
+      } else {
+        const arr = [...baseConfig[key]];
+        while (arr.length < newCount) {
+          arr.push(arr[0]);
+        }
+        baseConfig[key] = arr;
+      }
+    }
+  }
+
   baseConfig.filament_colour = colorsArray
+  baseConfig.filament_map = uniqueColors.map((_, i) => (i + 1).toString())
 
 
   if (options.bedId === "bambu-mini") {
