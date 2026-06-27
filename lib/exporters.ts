@@ -332,7 +332,7 @@ export async function build3MF(assets: ExportAssets): Promise<Blob> {
   const modelSettingsObjects: string[] = []
   const plateConfigs: string[] = []
 
-  const PLATE_SPACING = 292
+  const PLATE_SPACING = 307.2
   
   const numPlates = groups.length
   const columns = Math.ceil(Math.sqrt(numPlates))
