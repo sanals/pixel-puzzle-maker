@@ -308,59 +308,71 @@ function hexToTriplet(hex: string): string {
   return `#${h.padEnd(6, "0").slice(0, 6)}ff`.toUpperCase()
 }
 
+function generateUUID() {
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+    const r = Math.random() * 16 | 0, v = c === 'x' ? r : (r & 0x3 | 0x8);
+    return v.toString(16);
+  });
+}
+
 /** Build a multi-material .3MF (zip + XML) with native per-object color materials. */
-export function build3MF(assets: ExportAssets): Promise<Blob> {
+export async function build3MF(assets: ExportAssets): Promise<Blob> {
+  const { bambuProjectSettings } = await import("./bambu-project-settings");
   const zip = new JSZip()
   const groups = [...assets.trays, ...assets.tiles, ...assets.texts]
   if (assets.connectors) groups.push(assets.connectors)
-
-  // Normalize so all coordinates are positive (3MF expects a positive octant).
-  let minX = Infinity
-  let minY = Infinity
-  let minZ = Infinity
-  for (const grp of groups) {
-    const p = grp.geometry.getAttribute("position")
-    for (let i = 0; i < p.count; i++) {
-      // Geometry is Y-up, but 3MF is Z-up. Wait, we are instancing! 
-      // The instances matrices map world coordinates. So we find bounds in world.
-      for (const m of grp.instances) {
-        const v = new THREE.Vector3(p.getX(i), p.getY(i), p.getZ(i))
-        v.applyMatrix4(m)
-        minX = Math.min(minX, v.x)
-        minY = Math.min(minY, -v.z) // Z-up Y is -Z
-        minZ = Math.min(minZ, v.y)  // Z-up Z is Y
-      }
-    }
-  }
-  const ox = isFinite(minX) && minX < 0 ? -minX : 0
-  const oy = isFinite(minY) && minY < 0 ? -minY : 0
-  const oz = isFinite(minZ) && minZ < 0 ? -minZ : 0
 
   const colorEntries = groups
     .map((g) => `      <m:color color="${hexToTriplet(g.color)}"/>`)
     .join("\n")
 
   const objects: string[] = []
-  const components: string[] = []
+  const buildItems: string[] = []
+  
+  const modelSettingsObjects: string[] = []
+  const plateConfigs: string[] = []
+
+  const PLATE_SPACING = 292
+  
+  const numPlates = groups.length
+  const columns = Math.ceil(Math.sqrt(numPlates))
   
   let nextObjectId = 2 // 1 is reserved for basematerials
 
-  // Create an object for each geometry template
-  groups.forEach((grp, idx) => {
+  groups.forEach((grp, plateIdx) => {
+    const col = plateIdx % columns
+    const row = Math.floor(plateIdx / columns)
+    let minX = Infinity, maxX = -Infinity
+    let minY = Infinity, maxY = -Infinity
+    let minZ = Infinity, maxZ = -Infinity
+    const p = grp.geometry.index ? grp.geometry.toNonIndexed().getAttribute("position") : grp.geometry.getAttribute("position")
+    
+    for (let i = 0; i < p.count; i++) {
+      for (const m of grp.instances) {
+        const v = new THREE.Vector3(p.getX(i), p.getY(i), p.getZ(i))
+        v.applyMatrix4(m)
+        minX = Math.min(minX, v.x)
+        maxX = Math.max(maxX, v.x)
+        minY = Math.min(minY, -v.z) // Z-up Y is -worldZ
+        maxY = Math.max(maxY, -v.z)
+        minZ = Math.min(minZ, v.y)  // Z-up Z is worldY
+        maxZ = Math.max(maxZ, v.y)
+      }
+    }
+    
+    const cx = (minX + maxX) / 2
+    const cy = (minY + maxY) / 2
+    
     const templateId = nextObjectId++
     
-    // Convert Y-up geometry to Z-up string
     const verts: string[] = []
     const tris: string[] = []
-    const g = grp.geometry.index ? grp.geometry.toNonIndexed() : grp.geometry.clone()
-    const p = g.getAttribute("position")
-    const vertCount = p.count
+    
     for (let i = 0; i < p.count; i++) {
-      // Y-up -> Z-up via +90 rot X (x'=x, y'=-z, z'=y)
-      verts.push(`<vertex x="${fmt(p.getX(i))}" y="${fmt(-p.getZ(i))}" z="${fmt(p.getY(i))}"/>`)
+       verts.push(`<vertex x="${fmt(p.getX(i))}" y="${fmt(-p.getZ(i))}" z="${fmt(p.getY(i))}"/>`)
     }
-    for (let v = 0; v < vertCount; v += 3) {
-      tris.push(`<triangle v1="${v}" v2="${v + 1}" v3="${v + 2}" pid="1" p1="${idx}"/>`)
+    for (let v = 0; v < p.count; v += 3) {
+      tris.push(`<triangle v1="${v}" v2="${v + 1}" v3="${v + 2}" pid="1" p1="${plateIdx}"/>`)
     }
     
     objects.push(
@@ -371,46 +383,75 @@ export function build3MF(assets: ExportAssets): Promise<Blob> {
       `      </mesh>\n` +
       `    </object>`
     )
-
-    // Instantiate it multiple times as components of a master object
+    
+    const masterId = nextObjectId++
+    const componentTags: string[] = []
+    
     for (const m of grp.instances) {
       const e = m.elements
-      // Transform Y-up matrix to Z-up 3MF matrix string.
-      const tx = e[12] + ox
-      const ty = e[13] + oy
-      const tz = e[14] + oz
+      const tx = e[12]
+      const ty = e[13]
+      const tz = e[14]
       
-      const item_tx = tx
-      const item_ty = -tz
+      const item_tx = tx - cx
+      const item_ty = -tz - cy
       const item_tz = ty
       
-      components.push(`        <component objectid="${templateId}" transform="1 0 0 0 1 0 0 0 1 ${fmt(item_tx)} ${fmt(item_ty)} ${fmt(item_tz)}"/>`)
+      componentTags.push(`        <component objectid="${templateId}" transform="1 0 0 0 1 0 0 0 1 ${fmt(item_tx)} ${fmt(item_ty)} ${fmt(item_tz)}"/>`)
     }
+    
+    objects.push(
+      `    <object id="${masterId}" p:UUID="${generateUUID()}" type="model">\n` +
+      `      <components>\n` +
+      componentTags.join("\n") +
+      `\n      </components>\n` +
+      `    </object>`
+    )
+    
+    const globalX = col * PLATE_SPACING
+    const globalY = -row * PLATE_SPACING
+    buildItems.push(`    <item objectid="${masterId}" p:UUID="${generateUUID()}" transform="1 0 0 0 1 0 0 0 1 ${globalX + 128} ${globalY + 128} 0" printable="1"/>`)
+    
+    const cleanName = grp.name.replace(/[^a-zA-Z0-9_\- ]/g, "")
+    
+    modelSettingsObjects.push(`
+  <object id="${masterId}">
+    <metadata key="name" value="${cleanName}"/>
+    <metadata key="extruder" value="${plateIdx + 1}"/>
+    <part id="${templateId}" subtype="normal_part">
+      <metadata key="name" value="${cleanName}"/>
+      <metadata key="matrix" value="1 0 0 128 0 1 0 128 0 0 1 0 0 0 0 1"/>
+      <metadata key="source_file" value="${cleanName}.model"/>
+      <metadata key="source_object_id" value="0"/>
+      <metadata key="source_volume_id" value="0"/>
+      <metadata key="source_offset_x" value="0"/>
+      <metadata key="source_offset_y" value="0"/>
+      <metadata key="source_offset_z" value="0"/>
+    </part>
+  </object>`)
+
+    plateConfigs.push(`
+  <plate>
+    <metadata key="plater_id" value="${plateIdx + 1}"/>
+    <metadata key="plater_name" value="${cleanName}"/>
+    <metadata key="locked" value="false"/>
+    <model_instance>
+      <metadata key="object_id" value="${masterId}"/>
+      <metadata key="instance_id" value="0"/>
+    </model_instance>
+  </plate>`)
   })
-
-  // Group everything passed to this function into a single monolithic multi-part object
-  const masterId = nextObjectId++
-  objects.push(
-    `    <object id="${masterId}" type="model">\n` +
-    `      <components>\n` +
-    components.join("\n") +
-    `\n      </components>\n` +
-    `    </object>`
-  )
-
-  const buildItems = [`    <item objectid="${masterId}"/>`]
 
   const modelChunks: string[] = []
   modelChunks.push(
     `<?xml version="1.0" encoding="UTF-8"?>\n`,
     `<model unit="millimeter" xml:lang="en-US"\n`,
     `  xmlns="http://schemas.microsoft.com/3dmanufacturing/core/2015/02"\n`,
+    `  xmlns:p="http://schemas.bambulab.com/package/2021"\n`,
     `  xmlns:m="http://schemas.microsoft.com/3dmanufacturing/material/2015/02"\n`,
-    `  xmlns:slic3rpe="http://schemas.slic3r.org/3mf/2017/06">\n`,
-    `  <metadata name="Application">Pixel Puzzle Maker</metadata>\n`,
-    `  <metadata name="Title">Puzzle Board</metadata>\n`,
-    `  <metadata name="CreationDate">${new Date().toISOString().split("T")[0]}</metadata>\n`,
-    `  <metadata name="slic3rpe:3mf_version">2</metadata>\n`,
+    `  requiredextensions="p">\n`,
+    `  <metadata name="Application">BambuStudio-02.06.00.51</metadata>\n`,
+    `  <metadata name="BambuStudio:3mfVersion">1</metadata>\n`,
     `  <resources>\n`,
     `    <m:colorgroup id="1">\n${colorEntries}\n    </m:colorgroup>\n`
   )
@@ -427,22 +468,51 @@ export function build3MF(assets: ExportAssets): Promise<Blob> {
   
   const modelBlob = new Blob(modelChunks, { type: "text/xml" })
 
+  const modelSettingsXml = `<?xml version="1.0" encoding="UTF-8"?>
+<config>${modelSettingsObjects.join("")}${plateConfigs.join("")}
+  <assemble>
+  </assemble>
+</config>`
+
+  const baseConfig = JSON.parse(bambuProjectSettings)
+  baseConfig["printer_model"] = "Bambu Lab A1"
+  baseConfig["printer_settings_id"] = "Bambu Lab A1 0.4 nozzle"
+  baseConfig["default_print_profile"] = "0.20mm Standard @BBL A1"
+  const projectSettingsXml = JSON.stringify(baseConfig, null, 2)
+
+  const sliceInfoXml = `<?xml version="1.0" encoding="UTF-8"?>
+<config>
+  <header>
+    <header_item key="X-BBL-Client-Type" value="slicer"/>
+    <header_item key="X-BBL-Client-Version" value="1.9.1.66"/>
+  </header>
+</config>`
+
   const contentTypes =
     `<?xml version="1.0" encoding="UTF-8"?>\n` +
     `<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">\n` +
     `  <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>\n` +
     `  <Default Extension="model" ContentType="application/vnd.ms-package.3dmanufacturing-3dmodel+xml"/>\n` +
+    `  <Default Extension="config" ContentType="text/xml"/>\n` +
     `</Types>\n`
 
   const rels =
     `<?xml version="1.0" encoding="UTF-8"?>\n` +
     `<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">\n` +
-    `  <Relationship Target="/3D/3dmodel.model" Id="rel0" Type="http://schemas.microsoft.com/3dmanufacturing/2013/01/3dmodel"/>\n` +
+    `  <Relationship Target="/3D/3dmodel.model" Id="rel-1" Type="http://schemas.microsoft.com/3dmanufacturing/2013/01/3dmodel"/>\n` +
+    `  <Relationship Target="/Metadata/model_settings.config" Id="rel-2" Type="http://schemas.bambulab.com/package/2021/model_settings"/>\n` +
+    `  <Relationship Target="/Metadata/project_settings.config" Id="rel-3" Type="http://schemas.bambulab.com/package/2021/project_settings"/>\n` +
+    `  <Relationship Target="/Metadata/slice_info.config" Id="rel-4" Type="http://schemas.bambulab.com/package/2021/slice_info"/>\n` +
     `</Relationships>\n`
 
   zip.file("[Content_Types].xml", contentTypes)
   zip.folder("_rels")!.file(".rels", rels)
   zip.folder("3D")!.file("3dmodel.model", modelBlob)
+  
+  zip.folder("Metadata")!.file("model_settings.config", modelSettingsXml)
+  zip.folder("Metadata")!.file("project_settings.config", projectSettingsXml)
+  zip.folder("Metadata")!.file("slice_info.config", sliceInfoXml)
+  
   return zip.generateAsync({ type: "blob", mimeType: "model/3mf" })
 }
 

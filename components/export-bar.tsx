@@ -22,7 +22,7 @@ export function ExportBar() {
     setBusy("3mf")
     const id = toast.loading("Building multi-color 3MF…")
     try {
-      const assets = await assembleExportAssets(layout!, matrix!.palette, split!, config.embossing)
+      const assets = await assembleExportAssets(layout!, matrix!.palette, split!, config.embossing, { packTilesAtOrigin: true })
       const blob = await build3MF(assets)
       downloadBlob(blob, "pixel-puzzle.3mf")
       toast.success("Exported pixel-puzzle.3mf", {
