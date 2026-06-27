@@ -495,7 +495,13 @@ export async function build3MF(assets: ExportAssets, options: { bedWidth?: numbe
   </assemble>
 </config>`
 
+  const colorsArray = uniqueColors.length > 0 
+    ? uniqueColors.map(c => `${c}FF`) 
+    : ["#CCCCCCFF"]
+
   const baseConfig = JSON.parse(bambuProjectSettings)
+  baseConfig.filament_colour = colorsArray
+
 
   if (options.bedId === "bambu-mini") {
     baseConfig["printer_model"] = "Bambu Lab A1 mini"
