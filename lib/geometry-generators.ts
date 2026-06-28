@@ -277,11 +277,11 @@ export async function buildPuzzleGroup(
   const numBoardsZ = Math.ceil(layout.boardDepth / TRAY_SIZE)
 
   if (assets) {
-    const baseGeo = track(assets.base.clone())
+    const baseGeo = assets.base // DO NOT CLONE or track for disposal to save massive CPU/GPU re-allocation!
     const trayMat = track(
       new THREE.MeshStandardMaterial({ color: trayColor, roughness: 0.9, metalness: 0.02 }),
     )
-    const baseInst = new THREE.InstancedMesh(baseGeo, trayMat, numBoardsX * numBoardsZ)
+    const baseInst = track(new THREE.InstancedMesh(baseGeo, trayMat, numBoardsX * numBoardsZ))
     baseInst.receiveShadow = true
     baseInst.castShadow = true
 
@@ -312,63 +312,78 @@ export async function buildPuzzleGroup(
     group.add(baseInst)
   }
 
-  // --- Tiles, grouped per palette color into one InstancedMesh each ---
+  // --- Tiles: ONE single InstancedMesh for all 9000+ tiles ---
   const floorY = floorThickness
-  const byColor = new Map<number, number[]>()
+  const tileGeo = assets ? assets.block : track(createTileGeometry(layout.shape, layout.tileSize, layout.tileHeight))
+  
+  const tileMat = track(
+    new THREE.MeshStandardMaterial({
+      color: 0xffffff, // White base color, instanceColor will tint it
+      roughness: 0.55,
+      metalness: 0.05,
+    }),
+  )
+  
+  const tileInst = track(new THREE.InstancedMesh(tileGeo, tileMat, count))
+  tileInst.castShadow = true
+  tileInst.receiveShadow = true
+  
+  // Allocate color buffer
+  const colorArray = new Float32Array(count * 3)
+  tileInst.instanceColor = new THREE.InstancedBufferAttribute(colorArray, 3)
+
+  const mRot = new THREE.Matrix4().makeRotationX(Math.PI)
+  const colorObj = new THREE.Color()
+
   for (let i = 0; i < count; i++) {
-    const ci = layout.placements[i].colorIndex
-    if (!byColor.has(ci)) byColor.set(ci, [])
-    byColor.get(ci)!.push(i)
-  }
-
-  const m = new THREE.Matrix4()
-
-  for (const [colorIndex, indices] of byColor) {
-    const pal = palette[colorIndex]
-    if (pal.ignored) continue // Skip generating meshes for hidden colors
-
-    const tileGeo = assets ? track(assets.block.clone()) : track(createTileGeometry(layout.shape, layout.tileSize, layout.tileHeight))
-
-    const mat = track(
-      new THREE.MeshStandardMaterial({
-        color: new THREE.Color(pal.hex),
-        roughness: 0.55,
-        metalness: 0.05,
-      }),
-    )
-    const inst = new THREE.InstancedMesh(tileGeo, mat, indices.length)
-    inst.castShadow = true
-    inst.receiveShadow = true
-    indices.forEach((idx, j) => {
-      const p = layout.placements[idx]
-      // The block is centered, so we must raise it by half its height (3.6mm) so its bottom rests on floorY
-      // We also rotate by 180 degrees around X to flip the block so the chamfer faces UP in the preview.
+    const p = layout.placements[i]
+    const pal = palette[p.colorIndex]
+    
+    // Set Color
+    colorObj.set(pal.hex)
+    colorObj.toArray(colorArray, i * 3)
+    
+    const m = new THREE.Matrix4()
+    if (pal.ignored) {
+      // Hide completely by scaling to 0
+      m.makeScale(0, 0, 0)
+    } else {
       const mTrans = new THREE.Matrix4().makeTranslation(p.worldX, floorY + 3.6, p.worldZ)
-      const mRot = new THREE.Matrix4().makeRotationX(Math.PI)
       m.multiplyMatrices(mTrans, mRot)
-      inst.setMatrixAt(j, m)
-    })
-    inst.instanceMatrix.needsUpdate = true
-    inst.userData.colorIndex = colorIndex
-    inst.userData.placements = indices.map(idx => layout.placements[idx])
-    group.add(inst)
+    }
+    tileInst.setMatrixAt(i, m)
   }
+  
+  tileInst.instanceColor.needsUpdate = true
+  tileInst.instanceMatrix.needsUpdate = true
+  tileInst.userData.placements = layout.placements // All placements mapped 1:1
+  group.add(tileInst)
 
   // --- Letter decals (raised on tile face / recessed onto pocket floor) ---
   if (embossing !== "none") {
     const planeSize = layout.tileSize * 0.62
     const raised = embossing === "raised"
     const decalY = floorThickness + 0.01 // barely above the pocket floor
+    
+    // Group indices by color for decals
+    const byColor = new Map<number, number[]>()
+    for (let i = 0; i < count; i++) {
+      const ci = layout.placements[i].colorIndex
+      if (!byColor.has(ci)) byColor.set(ci, [])
+      byColor.get(ci)!.push(i)
+    }
+    
+    // Share a single plane geometry for all decal instances
+    const planeGeo = track(new THREE.PlaneGeometry(planeSize, planeSize))
+    
     for (const [colorIndex, indices] of byColor) {
       const pal = palette[colorIndex]
-      if (pal.ignored) continue // Skip generating decals for hidden colors
-
-      // Choose contrasting ink for legibility on raised tiles. Tray floor is light grey, so use dark ink for recessed.
-      const lum =
-        (0.2126 * pal.rgb[0] + 0.7152 * pal.rgb[1] + 0.0722 * pal.rgb[2]) / 255
+      if (pal.ignored) continue 
+      
+      const lum = (0.2126 * pal.rgb[0] + 0.7152 * pal.rgb[1] + 0.0722 * pal.rgb[2]) / 255
       const ink = raised ? (lum > 0.45 ? "#0b1020" : "#f8fafc") : "#0b1020"
       const tex = track(createLabelTexture(pal.label, ink))
-      const planeGeo = track(new THREE.PlaneGeometry(planeSize, planeSize))
+      
       const planeMat = track(
         new THREE.MeshStandardMaterial({
           map: tex,
@@ -377,7 +392,7 @@ export async function buildPuzzleGroup(
           depthWrite: false,
         }),
       )
-      const decals = new THREE.InstancedMesh(planeGeo, planeMat, indices.length)
+      const decals = track(new THREE.InstancedMesh(planeGeo, planeMat, indices.length))
       indices.forEach((idx, j) => {
         const p = layout.placements[idx]
         const mat4 = new THREE.Matrix4()

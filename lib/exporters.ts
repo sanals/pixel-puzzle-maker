@@ -68,7 +68,7 @@ export async function assembleExportAssets(
   palette: PaletteColor[],
   split: SplitPlan,
   embossing: EmbossingStyle,
-  options: { packTilesAtOrigin?: boolean; bedWidth?: number } = {}
+  options: { packTilesAtOrigin?: boolean; bedWidth?: number, onProgress?: (msg: string, percent?: number) => void } = {}
 ): Promise<ExportAssets> {
   const floorY = layout.baseHeight - layout.pocketDepth
   const tmp = new THREE.Matrix4()
@@ -123,6 +123,9 @@ export async function assembleExportAssets(
 
   for (let x = 0; x < numBoardsX; x++) {
     for (let z = 0; z < numBoardsZ; z++) {
+      if (options.onProgress) {
+        options.onProgress(`Embossing tray ${x * numBoardsZ + z + 1} of ${numBoardsX * numBoardsZ}...`, ((x * numBoardsZ + z) / (numBoardsX * numBoardsZ)) * 100)
+      }
       const totalW = numBoardsX * TRAY_SIZE
       const totalD = numBoardsZ * TRAY_SIZE
       const px = -totalW / 2 + (x * TRAY_SIZE) + (TRAY_SIZE / 2) - cx
@@ -330,13 +333,14 @@ function hexToTriplet(hex: string): string {
 
 function generateUUID() {
   return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function (c) {
-    const r = Math.random() * 16 | 0, v = c === 'x' ? r : (r & 0x3 | 0x8);
+        const r = Math.random() * 16 | 0, v = c === 'x' ? r : (r & 0x3 | 0x8);
     return v.toString(16);
   });
 }
 
 /** Build a multi-material .3MF (zip + XML) with native per-object color materials. */
-export async function build3MF(assets: ExportAssets, options: { bedWidth?: number, bedId?: string } = {}): Promise<Blob> {
+export async function build3MF(assets: ExportAssets, options: { bedWidth?: number, bedId?: string, onProgress?: (msg: string, percent?: number) => void } = {}): Promise<Blob> {
+  if (options?.onProgress) options.onProgress("Generating 3MF geometry...", 0)
   const { bambuProjectSettings } = await import("./bambu-project-settings");
   const zip = new JSZip()
   const groups = [...assets.trays, ...assets.tiles, ...assets.texts]
@@ -368,6 +372,7 @@ export async function build3MF(assets: ExportAssets, options: { bedWidth?: numbe
   let nextObjectId = 2 // 1 is reserved for basematerials
 
   for (let plateIdx = 0; plateIdx < groups.length; plateIdx++) {
+    if (options?.onProgress) options.onProgress(`Processing object ${plateIdx + 1}/${groups.length}...`, (plateIdx / groups.length) * 100)
     const grp = groups[plateIdx]
     const col = plateIdx % columns
     const row = Math.floor(plateIdx / columns)
@@ -606,11 +611,15 @@ export async function build3MF(assets: ExportAssets, options: { bedWidth?: numbe
   zip.folder("Metadata")!.file("project_settings.config", projectSettingsXml)
   zip.folder("Metadata")!.file("slice_info.config", sliceInfoXml)
 
+  if (options?.onProgress) options.onProgress("Compressing ZIP...", 0)
+
   return zip.generateAsync({ 
     type: "blob", 
     mimeType: "application/zip",
     compression: "DEFLATE",
     compressionOptions: { level: 6 }
+  }, (metadata) => {
+    if (options?.onProgress) options.onProgress(`Compressing ZIP...`, metadata.percent)
   })
 }
 
@@ -652,7 +661,7 @@ export function buildStlZip(assets: ExportAssets): Promise<Blob> {
 }
 
 /** Write a 3MF containing exactly one solid monolithic mesh from baked geometry. */
-async function buildBaked3MF(meshes: BakedMesh[]): Promise<Blob> {
+async function buildBaked3MF(meshes: BakedMesh[], options?: { onProgress?: (msg: string, percent?: number) => void }): Promise<Blob> {
   const verts: string[] = []
   const tris: string[] = []
   let vertIndex = 0
@@ -708,16 +717,21 @@ async function buildBaked3MF(meshes: BakedMesh[]): Promise<Blob> {
   zip.file("[Content_Types].xml", contentTypes)
   zip.folder("_rels")!.file(".rels", rels)
   zip.folder("3D")!.file("3dmodel.model", modelXml)
+  
+  if (options?.onProgress) options.onProgress("Compressing 3MF...", 0)
+  
   return zip.generateAsync({ 
     type: "blob", 
     mimeType: "model/3mf",
     compression: "DEFLATE",
     compressionOptions: { level: 6 }
+  }, (metadata) => {
+    if (options?.onProgress) options.onProgress(`Compressing 3MF...`, metadata.percent)
   })
 }
 
 /** Bundle 3MF files into a ZIP (ideal for printing color-by-color separated plates). */
-export async function build3MFZip(assets: ExportAssets): Promise<Blob> {
+export async function build3MFZip(assets: ExportAssets, options?: { onProgress?: (msg: string, percent?: number) => void }): Promise<Blob> {
   const zip = new JSZip()
 
   // Base trays
@@ -731,7 +745,8 @@ export async function build3MFZip(assets: ExportAssets): Promise<Blob> {
       connectors: null,
     }
 
-    const base3mf = await build3MF(trayAssets)
+    if (options?.onProgress) options.onProgress(`Generating plate ${trayExport.name}...`, (i / assets.trays.length) * 50)
+    const base3mf = await build3MF(trayAssets, options)
     const label = `1_Plate_${trayExport.name}.3mf`
     zip.file(label, base3mf)
   }
@@ -741,46 +756,56 @@ export async function build3MFZip(assets: ExportAssets): Promise<Blob> {
     const t = assets.tiles[i]
     const maxPerPlate = 30 * 30
 
-    if (t.instances.length <= maxPerPlate) {
-      const tileAssets: ExportAssets = {
-        trays: [],
-        tiles: [t],
-        texts: [],
-        connectors: null,
-      }
-      const t3mf = await build3MF(tileAssets)
-      zip.file(`2_Plate_Tiles_${t.color.replace("#", "")}.3mf`, t3mf)
-    } else {
-      let chunkIdx = 1
-      for (let j = 0; j < t.instances.length; j += maxPerPlate) {
-        const chunkInstances = t.instances.slice(j, j + maxPerPlate)
-        const chunkExport: InstancedExport = { ...t, instances: chunkInstances }
+      if (options?.onProgress) options.onProgress(`Generating color plate ${t.name}...`, 50 + (i / assets.tiles.length) * 50)
+      if (t.instances.length <= maxPerPlate) {
         const tileAssets: ExportAssets = {
           trays: [],
-          tiles: [chunkExport],
+          tiles: [t],
           texts: [],
           connectors: null,
         }
-        const t3mf = await build3MF(tileAssets)
-        zip.file(`2_Plate_Tiles_${t.color.replace("#", "")}_Part${chunkIdx}.3mf`, t3mf)
-        chunkIdx++
+        const t3mf = await build3MF(tileAssets, options)
+        zip.file(`2_Plate_Tiles_${t.color.replace("#", "")}.3mf`, t3mf)
+      } else {
+        let chunkIdx = 1
+        for (let j = 0; j < t.instances.length; j += maxPerPlate) {
+          const chunkInstances = t.instances.slice(j, j + maxPerPlate)
+          const chunkExport: InstancedExport = { ...t, instances: chunkInstances }
+          const tileAssets: ExportAssets = {
+            trays: [],
+            tiles: [chunkExport],
+            texts: [],
+            connectors: null,
+          }
+          const t3mf = await build3MF(tileAssets, options)
+          zip.file(`2_Plate_Tiles_${t.color.replace("#", "")}_Part${chunkIdx}.3mf`, t3mf)
+          chunkIdx++
+        }
       }
     }
-  }
-
-  // Connectors
-  if (assets.connectors) {
-    const connectorAssets: ExportAssets = {
-      trays: [],
-      tiles: [],
-      texts: [],
-      connectors: assets.connectors,
+  
+    // Connectors
+    if (assets.connectors) {
+      const connectorAssets: ExportAssets = {
+        trays: [],
+        tiles: [],
+        texts: [],
+        connectors: assets.connectors,
+      }
+      const c3mf = await build3MF(connectorAssets, options)
+      zip.file("3_Plate_Connectors.3mf", c3mf)
     }
-    const c3mf = await build3MF(connectorAssets)
-    zip.file("3_Plate_Connectors.3mf", c3mf)
-  }
-
-  return zip.generateAsync({ type: "blob" })
+    
+    if (options?.onProgress) options.onProgress("Compressing ZIP...", 0)
+  
+    return zip.generateAsync({ 
+      type: "blob",
+      mimeType: "application/zip",
+      compression: "DEFLATE",
+      compressionOptions: { level: 6 }
+    }, (metadata) => {
+      if (options?.onProgress) options.onProgress(`Compressing ZIP...`, metadata.percent)
+    })
 }
 
 /** Trigger a browser download for a Blob/ArrayBuffer. */

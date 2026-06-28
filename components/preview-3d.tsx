@@ -84,17 +84,27 @@ export function Preview3D({ layout, palette, embossing }: Preview3DProps) {
     ground.receiveShadow = true
     scene.add(ground)
 
-    let raf = 0
-    const animate = () => {
-      raf = requestAnimationFrame(animate)
-      if (controlsRef.current) {
-         controlsRef.current.update()
-      }
-      if (sceneRef.current && cameraRef.current) {
-        renderer.render(sceneRef.current, cameraRef.current)
+    let renderRequested = false
+    const requestRender = () => {
+      if (!renderRequested) {
+        renderRequested = true
+        requestAnimationFrame(() => {
+          renderRequested = false
+          if (controlsRef.current) controlsRef.current.update()
+          if (sceneRef.current && cameraRef.current) {
+            renderer.render(sceneRef.current, cameraRef.current)
+          }
+        })
       }
     }
-    animate()
+    
+    // This allows OrbitControls damping to naturally keep requesting frames until momentum reaches 0
+    controls.addEventListener('change', requestRender)
+    
+    // Store requestRender on the scene so we can manually trigger it from the second useEffect
+    scene.userData.requestRender = requestRender
+    
+    requestRender()
 
     const handleResize = () => {
       if (!mountRef.current || !cameraRef.current || !rendererRef.current) return
@@ -104,6 +114,7 @@ export function Preview3D({ layout, palette, embossing }: Preview3DProps) {
       cameraRef.current.aspect = w / h
       cameraRef.current.updateProjectionMatrix()
       rendererRef.current.setSize(w, h)
+      requestRender()
     }
     const ro = new ResizeObserver(handleResize)
     ro.observe(mount)
@@ -138,7 +149,6 @@ export function Preview3D({ layout, palette, embossing }: Preview3DProps) {
     renderer.domElement.addEventListener('pointerdown', onPointerDown)
 
     return () => {
-      cancelAnimationFrame(raf)
       ro.disconnect()
       controls.dispose()
       renderer.domElement.removeEventListener('pointerdown', onPointerDown)
@@ -227,6 +237,11 @@ export function Preview3D({ layout, palette, embossing }: Preview3DProps) {
       currentDispose = dispose
       groupRef.current = group
       scene.add(group)
+      
+      // Trigger a render frame now that the scene has updated
+      if (scene.userData.requestRender) {
+        scene.userData.requestRender()
+      }
     })
 
     return () => {
