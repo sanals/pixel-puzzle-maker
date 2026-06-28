@@ -41,7 +41,7 @@ export async function loadMasterAssets(basePlateSize: number): Promise<MasterAss
     loader.loadAsync("/models/sample_block.stl"),
     loader.loadAsync("/models/connector_47.stl"),
   ])
-  
+
   // The master STLs from CAD are Z-up. 
   // Three.js is Y-up. So we rotate them -90 degrees around X.
   base.rotateX(-Math.PI / 2)
@@ -174,7 +174,7 @@ export function createTrayGeometry(
   }
 
   const floorThickness = layout.baseHeight - layout.pocketDepth
-  
+
   // The lattice walls
   const latticeGeo = new THREE.ExtrudeGeometry(outer, {
     depth: layout.pocketDepth,
@@ -196,18 +196,18 @@ export function createTrayGeometry(
   if (textBrush && textOp !== undefined) {
     const floorBrush = new Brush(floorNonIdx)
     floorBrush.updateMatrixWorld()
-    
+
     // We create a fresh evaluator for safety
     const localEvaluator = new Evaluator()
     localEvaluator.useGroups = false
-    
+
     const result = localEvaluator.evaluate(floorBrush, textBrush, textOp)
     floorNonIdx.dispose()
     floorNonIdx = result.geometry
   }
 
   const merged = mergeBufferGeometries([floorNonIdx, latticeNonIdx])
-  
+
   floorGeo.dispose()
   latticeGeo.dispose()
   floorNonIdx.dispose()
@@ -284,7 +284,7 @@ export async function buildPuzzleGroup(
     const baseInst = new THREE.InstancedMesh(baseGeo, trayMat, numBoardsX * numBoardsZ)
     baseInst.receiveShadow = true
     baseInst.castShadow = true
-    
+
     let idx = 0
     for (let x = 0; x < numBoardsX; x++) {
       for (let z = 0; z < numBoardsZ; z++) {
@@ -292,7 +292,7 @@ export async function buildPuzzleGroup(
         // Trays center at 0,0 locally. We need to align the cluster.
         const totalW = numBoardsX * TRAY_SIZE
         const totalD = numBoardsZ * TRAY_SIZE
-        
+
         // Because the base plate STLs have their origin at (0,0) at the bottom-left corner,
         // Wait! The previous assemble_1.stl was centered at (112, 112). 
         // Are the new base_X_X.stl files centered?
@@ -300,11 +300,11 @@ export async function buildPuzzleGroup(
         const bbox = baseGeo.boundingBox!
         const cx = (bbox.max.x + bbox.min.x) / 2
         const cz = (bbox.max.z + bbox.min.z) / 2
-        
+
         const px = -totalW / 2 + (x * TRAY_SIZE) + (TRAY_SIZE / 2) - cx
         const pz = -totalD / 2 + (z * TRAY_SIZE) + (TRAY_SIZE / 2) - cz
         mTray.makeTranslation(px, 0, pz)
-        
+
         baseInst.setMatrixAt(idx++, mTray)
       }
     }
@@ -326,7 +326,7 @@ export async function buildPuzzleGroup(
   for (const [colorIndex, indices] of byColor) {
     const pal = palette[colorIndex]
     const tileGeo = assets ? track(assets.block.clone()) : track(createTileGeometry(layout.shape, layout.tileSize, layout.tileHeight))
-    
+
     const mat = track(
       new THREE.MeshStandardMaterial({
         color: new THREE.Color(pal.hex),

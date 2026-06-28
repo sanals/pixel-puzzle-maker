@@ -11,6 +11,7 @@ import { Brush, Evaluator, SUBTRACTION, ADDITION } from "three-bvh-csg"
 import { mergeBufferGeometries, TextGeometry } from "three-stdlib"
 
 const TRAY_COLOR = "#cbd5e1"
+import * as BufferGeometryUtils from "three/examples/jsm/utils/BufferGeometryUtils.js"
 
 /** A template mesh with a list of instance transforms. */
 export interface InstancedExport {
@@ -231,12 +232,12 @@ export async function assembleExportAssets(
     const sizeZ = bbox.max.z - bbox.min.z
     const gapX = sizeX + 3
     const gapZ = sizeZ + 3
-    
+
     const bedWidth = options.bedWidth || 256
     const maxSafeWidth = bedWidth - 25
     const maxPerRow = Math.max(1, Math.floor(maxSafeWidth / gapX))
     const actualPerRow = Math.min(split.connectorCount, maxPerRow)
-    
+
     const startX = layout.boardWidth / 2 + gapX
     for (let i = 0; i < split.connectorCount; i++) {
       const row = Math.floor(i / actualPerRow)
@@ -362,69 +363,65 @@ export async function build3MF(assets: ExportAssets, options: { bedWidth?: numbe
   groups.forEach((grp, plateIdx) => {
     const col = plateIdx % columns
     const row = Math.floor(plateIdx / columns)
-    let minX = Infinity, maxX = -Infinity
-    let minY = Infinity, maxY = -Infinity
-    let minZ = Infinity, maxZ = -Infinity
-    const p = grp.geometry.index ? grp.geometry.toNonIndexed().getAttribute("position") : grp.geometry.getAttribute("position")
 
-    for (let i = 0; i < p.count; i++) {
-      for (const m of grp.instances) {
-        const v = new THREE.Vector3(p.getX(i), p.getY(i), p.getZ(i))
-        v.applyMatrix4(m)
-        minX = Math.min(minX, v.x)
-        maxX = Math.max(maxX, v.x)
-        minY = Math.min(minY, -v.z) // Z-up Y is -worldZ
-        maxY = Math.max(maxY, -v.z)
-        minZ = Math.min(minZ, v.y)  // Z-up Z is worldY
-        maxZ = Math.max(maxZ, v.y)
-      }
+    // 1. Merge all instances into a single massive geometry
+    const clonedGeoms: THREE.BufferGeometry[] = []
+
+    // Force the source geometry to be non-indexed so mergeBufferGeometries doesn't complain about mixed attributes
+    let sourceGeo = grp.geometry
+    if (sourceGeo.index) sourceGeo = sourceGeo.toNonIndexed()
+
+    // Keep only position to avoid merge issues
+    const attrs = Object.keys(sourceGeo.attributes)
+    attrs.forEach(key => {
+      if (key !== 'position') sourceGeo.deleteAttribute(key)
+    })
+
+    if (grp.instances.length === 0) return
+
+    for (const m of grp.instances) {
+      const geo = sourceGeo.clone()
+      geo.applyMatrix4(m)
+      clonedGeoms.push(geo)
     }
 
-    const cx = (minX + maxX) / 2
-    const cy = (minY + maxY) / 2
+    let mergedSoup = mergeBufferGeometries(clonedGeoms)
+    if (!mergedSoup) return
 
-    const templateId = nextObjectId++
+    // 2. Weld all perfectly touching faces together to satisfy Bambu Studio
+    let exportGeo = BufferGeometryUtils.mergeVertices(mergedSoup, 1e-4)
 
+    // 3. Compute Bounding Box to center it
+    exportGeo.computeBoundingBox()
+    const bbox = exportGeo.boundingBox!
+    const cx = (bbox.min.x + bbox.max.x) / 2
+    const cy = (bbox.min.z + bbox.max.z) / 2 // Z-up is -worldZ, but bounding box is Y-up Z
+
+    // 4. Translate to origin so it can be placed properly on the plate
+    exportGeo.translate(-cx, 0, -cy)
+
+    const p = exportGeo.getAttribute("position")
     const verts: string[] = []
     const tris: string[] = []
 
     for (let i = 0; i < p.count; i++) {
       verts.push(`<vertex x="${fmt(p.getX(i))}" y="${fmt(-p.getZ(i))}" z="${fmt(p.getY(i))}"/>`)
     }
-    for (let v = 0; v < p.count; v += 3) {
-      tris.push(`<triangle v1="${v}" v2="${v + 1}" v3="${v + 2}" pid="1" p1="${plateIdx}"/>`)
+
+    const colorIndex = uniqueColors.indexOf(grp.color)
+    const index = exportGeo.index!
+    for (let i = 0; i < index.count; i += 3) {
+      tris.push(`<triangle v1="${index.getX(i)}" v2="${index.getX(i + 1)}" v3="${index.getX(i + 2)}" pid="1" p1="${colorIndex}"/>`)
     }
 
+    const masterId = nextObjectId++
+
     objects.push(
-      `    <object id="${templateId}" type="model">\n` +
+      `    <object id="${masterId}" p:UUID="${generateUUID()}" type="model">\n` +
       `      <mesh>\n` +
       `        <vertices>${verts.join("")}</vertices>\n` +
       `        <triangles>${tris.join("")}</triangles>\n` +
       `      </mesh>\n` +
-      `    </object>`
-    )
-
-    const masterId = nextObjectId++
-    const componentTags: string[] = []
-
-    for (const m of grp.instances) {
-      const e = m.elements
-      const tx = e[12]
-      const ty = e[13]
-      const tz = e[14]
-
-      const item_tx = tx - cx
-      const item_ty = -tz - cy
-      const item_tz = ty
-
-      componentTags.push(`        <component objectid="${templateId}" transform="1 0 0 0 1 0 0 0 1 ${fmt(item_tx)} ${fmt(item_ty)} ${fmt(item_tz)}"/>`)
-    }
-
-    objects.push(
-      `    <object id="${masterId}" p:UUID="${generateUUID()}" type="model">\n` +
-      `      <components>\n` +
-      componentTags.join("\n") +
-      `\n      </components>\n` +
       `    </object>`
     )
 
@@ -439,7 +436,7 @@ export async function build3MF(assets: ExportAssets, options: { bedWidth?: numbe
   <object id="${masterId}">
     <metadata key="name" value="${cleanName}"/>
     <metadata key="extruder" value="${extruderIndex}"/>
-    <part id="${templateId}" subtype="normal_part">
+    <part id="${masterId}" subtype="normal_part">
       <metadata key="name" value="${cleanName}"/>
       <metadata key="matrix" value="1 0 0 ${plateSize / 2} 0 1 0 ${plateSize / 2} 0 0 1 0 0 0 0 1"/>
       <metadata key="source_file" value="${cleanName}.model"/>
@@ -495,8 +492,8 @@ export async function build3MF(assets: ExportAssets, options: { bedWidth?: numbe
   </assemble>
 </config>`
 
-  const colorsArray = uniqueColors.length > 0 
-    ? uniqueColors.map(c => `${c}FF`) 
+  const colorsArray = uniqueColors.length > 0
+    ? uniqueColors.map(c => `${c}FF`)
     : ["#CCCCCCFF"]
 
   const baseConfig = JSON.parse(bambuProjectSettings)
