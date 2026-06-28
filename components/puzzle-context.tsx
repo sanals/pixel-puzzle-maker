@@ -30,6 +30,13 @@ interface PuzzleContextValue {
   layout: GridLayout | null
   split: SplitPlan | null
   config: PuzzleConfig
+  paintMode: boolean
+  activeColorIndex: number
+  setPaintMode: (mode: boolean) => void
+  setActiveColorIndex: (index: number) => void
+  updatePaletteColor: (index: number, hex: string) => void
+  addPaletteColor: (hex: string) => void
+  paintCell: (x: number, y: number, colorIndex: number) => void
   loadCroppedImage: (url: string, fileName: string) => void
   updateConfig: (patch: Partial<PuzzleConfig>) => void
   reset: () => void
@@ -43,6 +50,12 @@ export function usePuzzle(): PuzzleContextValue {
   return ctx
 }
 
+function hexToRgb(hex: string): [number, number, number] {
+  const c = hex.substring(1)
+  const rgb = parseInt(c, 16)
+  return [(rgb >> 16) & 255, (rgb >> 8) & 255, rgb & 255]
+}
+
 export function PuzzleProvider({ children }: { children: React.ReactNode }) {
   const [fileName, setFileName] = useState<string | null>(null)
   const [imageUrl, setImageUrl] = useState<string | null>(null)
@@ -50,6 +63,9 @@ export function PuzzleProvider({ children }: { children: React.ReactNode }) {
   const [matrix, setMatrix] = useState<VoxelMatrix | null>(null)
   const [processing, setProcessing] = useState(false)
   const [config, setConfig] = useState<PuzzleConfig>(DEFAULT_CONFIG)
+  
+  const [paintMode, setPaintMode] = useState(false)
+  const [activeColorIndex, setActiveColorIndex] = useState(0)
 
   const workerRef = useRef<Worker | null>(null)
   const requestId = useRef(0)
@@ -63,6 +79,8 @@ export function PuzzleProvider({ children }: { children: React.ReactNode }) {
       setProcessing(false)
       if (data.type === "result") {
         setMatrix(data.matrix)
+        setPaintMode(false)
+        setActiveColorIndex(0)
       } else if (data.type === "error") {
         console.log("[v0] worker error:", data.message)
       }
@@ -138,10 +156,78 @@ export function PuzzleProvider({ children }: { children: React.ReactNode }) {
     })
   }, [])
 
+  const updatePaletteColor = useCallback((index: number, hex: string) => {
+    setMatrix((prev) => {
+      if (!prev) return prev
+      const newPalette = [...prev.palette]
+      newPalette[index] = { ...newPalette[index], hex, rgb: hexToRgb(hex) }
+      return { ...prev, palette: newPalette }
+    })
+  }, [])
+
+  const addPaletteColor = useCallback((hex: string) => {
+    setMatrix((prev) => {
+      if (!prev) return prev
+      const newPalette = [...prev.palette]
+      const newIndex = newPalette.length
+      
+      // Basic label generator for custom colors: AA, AB, etc. if we exceed Z.
+      // But we can just use the labelForIndex logic from image-processing if we had it exported,
+      // or a simple inline one for now:
+      let label = ""
+      let n = newIndex
+      do {
+        label = String.fromCharCode(65 + (n % 26)) + label
+        n = Math.floor(n / 26) - 1
+      } while (n >= 0)
+
+      newPalette.push({
+        index: newIndex,
+        label,
+        hex,
+        rgb: hexToRgb(hex),
+        count: 0,
+        coverage: 0,
+      })
+      return { ...prev, palette: newPalette }
+    })
+  }, [])
+
+  const paintCell = useCallback((x: number, y: number, colorIndex: number) => {
+    setMatrix((prev) => {
+      if (!prev) return prev
+      if (x < 0 || x >= prev.width || y < 0 || y >= prev.height) return prev
+
+      const oldColorIndex = prev.cells[x][y].colorIndex
+      if (oldColorIndex === colorIndex) return prev
+
+      const newCells = [...prev.cells]
+      newCells[x] = [...newCells[x]]
+      newCells[x][y] = {
+        ...newCells[x][y],
+        colorIndex,
+        hexColor: prev.palette[colorIndex].hex,
+        label: prev.palette[colorIndex].label,
+      }
+
+      const newPalette = prev.palette.map((p) => ({ ...p }))
+      newPalette[oldColorIndex].count--
+      newPalette[colorIndex].count++
+      
+      const totalPixels = prev.width * prev.height
+      newPalette[oldColorIndex].coverage = newPalette[oldColorIndex].count / totalPixels
+      newPalette[colorIndex].coverage = newPalette[colorIndex].count / totalPixels
+
+      return { ...prev, cells: newCells, palette: newPalette }
+    })
+  }, [])
+
   const reset = useCallback(() => {
     setMatrix(null)
     setImageData(null)
     setFileName(null)
+    setPaintMode(false)
+    setActiveColorIndex(0)
     setImageUrl((prev) => {
       if (prev) URL.revokeObjectURL(prev)
       return null
@@ -166,6 +252,13 @@ export function PuzzleProvider({ children }: { children: React.ReactNode }) {
     layout,
     split,
     config,
+    paintMode,
+    activeColorIndex,
+    setPaintMode,
+    setActiveColorIndex,
+    updatePaletteColor,
+    addPaletteColor,
+    paintCell,
     loadCroppedImage,
     updateConfig,
     reset,

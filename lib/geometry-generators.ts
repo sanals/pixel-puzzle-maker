@@ -348,6 +348,7 @@ export async function buildPuzzleGroup(
     })
     inst.instanceMatrix.needsUpdate = true
     inst.userData.colorIndex = colorIndex
+    inst.userData.placements = indices.map(idx => layout.placements[idx])
     group.add(inst)
   }
 
