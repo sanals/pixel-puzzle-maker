@@ -1,6 +1,6 @@
 "use client"
 import { useEffect } from "react"
-import { Grid2x2, Palette } from "lucide-react"
+import { Grid2x2, Palette, Paintbrush } from "lucide-react"
 import { ColorLegend } from "@/components/color-legend"
 import { ExportBar } from "@/components/export-bar"
 import { PrintConfig } from "@/components/print-config"
@@ -13,7 +13,7 @@ import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { MAX_COLORS, MIN_COLORS, BasePlateSize } from "@/lib/types"
 
 export function ControlPanel() {
-  const { config, updateConfig, hasImage, processing } = usePuzzle()
+  const { config, updateConfig, hasImage, processing, paintMode, setPaintMode } = usePuzzle()
   const disabled = !hasImage
 
   const maxRatioDim = Math.max(config.cropRatio.w, config.cropRatio.h)
@@ -133,12 +133,26 @@ export function ControlPanel() {
       <Separator />
 
       <div className="flex flex-col gap-2">
-        <Label className="text-sm font-medium">
-          Palette Legend
-          {processing && (
-            <span className="ml-2 text-xs font-normal text-primary">processing…</span>
-          )}
-        </Label>
+        <div className="flex items-center justify-between">
+          <Label className="text-sm font-medium">
+            Palette Legend
+            {processing && (
+              <span className="ml-2 text-xs font-normal text-primary">processing…</span>
+            )}
+          </Label>
+          <button
+            onClick={() => setPaintMode(!paintMode)}
+            disabled={disabled}
+            className={`flex items-center gap-1.5 rounded-md border px-2.5 py-1 text-xs font-medium transition-colors ${
+              paintMode
+                ? "bg-primary text-primary-foreground border-primary"
+                : "bg-background hover:bg-muted text-muted-foreground hover:text-foreground disabled:opacity-50"
+            }`}
+          >
+            <Paintbrush className="h-3.5 w-3.5" />
+            {paintMode ? "Painting" : "Paint"}
+          </button>
+        </div>
         <ColorLegend />
       </div>
 

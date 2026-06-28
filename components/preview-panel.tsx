@@ -52,10 +52,10 @@ export function PreviewPanel() {
         </div>
 
         <div className="relative min-h-0 flex-1">
-          <TabsContent value="3d" className="absolute inset-0 m-0 data-[state=inactive]:hidden">
+          <TabsContent value="3d" keepMounted className="absolute inset-0 m-0 data-[state=inactive]:hidden">
             <Preview3D layout={layout} palette={matrix.palette} embossing={config.embossing} />
           </TabsContent>
-          <TabsContent value="2d" className="absolute inset-0 m-0 overflow-auto data-[state=inactive]:hidden">
+          <TabsContent value="2d" keepMounted className="absolute inset-0 m-0 overflow-auto data-[state=inactive]:hidden">
             <Preview2D matrix={matrix} />
           </TabsContent>
         </div>

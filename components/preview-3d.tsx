@@ -43,13 +43,16 @@ export function Preview3D({ layout, palette, embossing }: Preview3DProps) {
     sceneRef.current = scene
     scene.background = new THREE.Color("#0f1424")
 
-    const camera = new THREE.PerspectiveCamera(42, width / height, 0.1, 5000)
+    const aspect = (width && height) ? (width / height) : 1
+    const camera = new THREE.PerspectiveCamera(42, aspect, 0.1, 5000)
+    // PREVENT NaN CORRUPTION: OrbitControls breaks if camera and target are both (0,0,0)
+    camera.position.set(100, 100, 100)
     cameraRef.current = camera
 
     const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false })
     rendererRef.current = renderer
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2))
-    renderer.setSize(width, height)
+    renderer.setSize(width || 100, height || 100)
     renderer.shadowMap.enabled = true
     renderer.shadowMap.type = THREE.PCFShadowMap
     mount.appendChild(renderer.domElement)
@@ -66,8 +69,6 @@ export function Preview3D({ layout, palette, embossing }: Preview3DProps) {
     key.castShadow = true
     key.shadow.mapSize.set(2048, 2048)
     scene.add(key)
-    // Save key light to a custom property to update its position later if needed, 
-    // or we'll just update it dynamically in the other effect.
     scene.userData.keyLight = key
 
     const fill = new THREE.DirectionalLight(0x9db4ff, 0.4)
@@ -75,7 +76,7 @@ export function Preview3D({ layout, palette, embossing }: Preview3DProps) {
     scene.userData.fillLight = fill
 
     // Ground shadow catcher
-    const groundGeo = new THREE.PlaneGeometry(10000, 10000) // Huge ground
+    const groundGeo = new THREE.PlaneGeometry(10000, 10000)
     const groundMat = new THREE.ShadowMaterial({ opacity: 0.28 })
     const ground = new THREE.Mesh(groundGeo, groundMat)
     ground.rotation.x = -Math.PI / 2
@@ -87,19 +88,6 @@ export function Preview3D({ layout, palette, embossing }: Preview3DProps) {
     const animate = () => {
       raf = requestAnimationFrame(animate)
       if (controlsRef.current) {
-         if (stateRef.current.paintMode) {
-            controlsRef.current.mouseButtons = {
-              LEFT: THREE.MOUSE.NONE,
-              MIDDLE: THREE.MOUSE.DOLLY,
-              RIGHT: THREE.MOUSE.ROTATE
-            }
-         } else {
-            controlsRef.current.mouseButtons = {
-              LEFT: THREE.MOUSE.ROTATE,
-              MIDDLE: THREE.MOUSE.DOLLY,
-              RIGHT: THREE.MOUSE.PAN
-            }
-         }
          controlsRef.current.update()
       }
       if (sceneRef.current && cameraRef.current) {
@@ -112,6 +100,7 @@ export function Preview3D({ layout, palette, embossing }: Preview3DProps) {
       if (!mountRef.current || !cameraRef.current || !rendererRef.current) return
       const w = mountRef.current.clientWidth
       const h = mountRef.current.clientHeight
+      if (w === 0 || h === 0) return
       cameraRef.current.aspect = w / h
       cameraRef.current.updateProjectionMatrix()
       rendererRef.current.setSize(w, h)
@@ -162,6 +151,24 @@ export function Preview3D({ layout, palette, embossing }: Preview3DProps) {
     }
   }, [])
 
+  useEffect(() => {
+    if (controlsRef.current) {
+      if (paintMode) {
+        controlsRef.current.mouseButtons = {
+          LEFT: 99 as THREE.MOUSE, // 99 doesn't match any mouse button, effectively disabling LEFT
+          MIDDLE: THREE.MOUSE.DOLLY,
+          RIGHT: THREE.MOUSE.ROTATE
+        }
+      } else {
+        controlsRef.current.mouseButtons = {
+          LEFT: THREE.MOUSE.ROTATE,
+          MIDDLE: THREE.MOUSE.DOLLY,
+          RIGHT: THREE.MOUSE.PAN
+        }
+      }
+    }
+  }, [paintMode])
+
   const lastSpanRef = useRef<number | null>(null)
 
   // 2. Build Puzzle Geometries and update Camera/Lights based on Layout
@@ -176,8 +183,14 @@ export function Preview3D({ layout, palette, embossing }: Preview3DProps) {
     // Only reset camera and lights if the physical size of the board changes
     if (lastSpanRef.current !== span) {
       lastSpanRef.current = span
+      
+      // Temporarily disable damping to force a hard teleport without residual momentum
+      controls.enableDamping = false
       camera.position.set(span * 0.75, span * 0.85, span * 0.95)
       controls.target.set(0, layout.baseHeight, 0)
+      camera.lookAt(0, layout.baseHeight, 0)
+      controls.update() 
+      controls.enableDamping = true
       
       if (scene.userData.keyLight) {
          const key = scene.userData.keyLight as THREE.DirectionalLight
@@ -230,20 +243,8 @@ export function Preview3D({ layout, palette, embossing }: Preview3DProps) {
     <div className="relative h-full w-full">
       <div ref={mountRef} className="absolute inset-0" aria-label="Interactive 3D preview" />
       
-      <div className="absolute right-4 top-4 z-10 flex flex-col gap-2">
-        <button
-          onClick={() => setPaintMode(!paintMode)}
-          className={`flex h-10 w-10 items-center justify-center rounded-md border shadow-sm transition-colors ${
-            paintMode ? "bg-primary text-primary-foreground border-primary" : "bg-background text-foreground hover:bg-muted"
-          }`}
-          title={paintMode ? "Exit Paint Mode" : "Enter Paint Mode"}
-        >
-          <Paintbrush className="h-5 w-5" />
-        </button>
-      </div>
-      
       {paintMode && (
-        <div className="pointer-events-none absolute bottom-4 left-0 right-0 flex justify-center">
+        <div className="pointer-events-none absolute bottom-4 left-0 right-0 flex justify-center z-10">
           <div className="rounded-full bg-background/80 px-4 py-2 text-sm font-medium shadow-md backdrop-blur-sm border">
             Paint Mode: Click tiles to apply selected color (Right-click to rotate)
           </div>

@@ -17,19 +17,21 @@ export function Preview2D({ matrix }: Preview2DProps) {
     const ctx = canvas.getContext("2d")
     if (!ctx) return
 
-    const dpr = Math.min(window.devicePixelRatio || 1, 2)
-    const display = Math.min(canvas.parentElement?.clientWidth ?? 480, 560)
-    const cell = Math.max(2, Math.floor(display / matrix.width))
+    // Draw the canvas at a fixed, high resolution internally.
+    // CSS max-w-full and max-h-full will scale it down to fit the screen.
+    const cell = 40 
     const dim = cell * matrix.width
 
-    canvas.width = dim * dpr
-    canvas.height = dim * dpr
-    canvas.style.width = `${dim}px`
-    canvas.style.height = `${dim}px`
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
+    canvas.width = dim
+    canvas.height = dim
+    
+    // Clear styles that might force it to be tiny
+    canvas.style.width = ""
+    canvas.style.height = ""
+    
     ctx.clearRect(0, 0, dim, dim)
 
-    const drawLabels = showLabels && cell >= 14
+    const drawLabels = showLabels
     ctx.textAlign = "center"
     ctx.textBaseline = "middle"
     ctx.font = `${Math.floor(cell * 0.55)}px ui-monospace, monospace`
@@ -62,7 +64,7 @@ export function Preview2D({ matrix }: Preview2DProps) {
       <div className="flex flex-1 items-center justify-center overflow-auto">
         <canvas
           ref={canvasRef}
-          className="rounded-md shadow-lg ring-1 ring-border"
+          className="rounded-md shadow-lg ring-1 ring-border max-w-full max-h-full object-contain"
           aria-label="2D pixel map preview"
         />
       </div>
