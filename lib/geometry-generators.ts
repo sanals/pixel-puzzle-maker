@@ -325,6 +325,8 @@ export async function buildPuzzleGroup(
 
   for (const [colorIndex, indices] of byColor) {
     const pal = palette[colorIndex]
+    if (pal.ignored) continue // Skip generating meshes for hidden colors
+
     const tileGeo = assets ? track(assets.block.clone()) : track(createTileGeometry(layout.shape, layout.tileSize, layout.tileHeight))
 
     const mat = track(
@@ -359,6 +361,8 @@ export async function buildPuzzleGroup(
     const decalY = floorThickness + 0.01 // barely above the pocket floor
     for (const [colorIndex, indices] of byColor) {
       const pal = palette[colorIndex]
+      if (pal.ignored) continue // Skip generating decals for hidden colors
+
       // Choose contrasting ink for legibility on raised tiles. Tray floor is light grey, so use dark ink for recessed.
       const lum =
         (0.2126 * pal.rgb[0] + 0.7152 * pal.rgb[1] + 0.0722 * pal.rgb[2]) / 255

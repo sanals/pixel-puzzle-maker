@@ -94,7 +94,7 @@ export async function assembleExportAssets(
   const placementTexts: THREE.BufferGeometry[] = []
   if (embossing !== "none") {
     for (const [colorIndex, pal] of palette.entries()) {
-      if (!pal.label) continue
+      if (!pal.label || pal.ignored) continue
       const textGeo = new TextGeometry(pal.label, {
         font, size: fontSize, height: textDepth, curveSegments: 2, bevelEnabled: false
       })
@@ -182,6 +182,8 @@ export async function assembleExportAssets(
   const MAX_PER_PLATE = MAX_COLS * MAX_COLS
 
   for (const [colorIndex, pal] of palette.entries()) {
+    if (pal.ignored) continue
+    
     const indices = layout.placements
       .map((p, i) => (p.colorIndex === colorIndex ? i : -1))
       .filter((i) => i !== -1)

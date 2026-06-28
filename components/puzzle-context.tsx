@@ -38,6 +38,8 @@ interface PuzzleContextValue {
   addPaletteColor: (hex: string) => void
   paintCell: (x: number, y: number, colorIndex: number) => void
   loadCroppedImage: (url: string, fileName: string) => void
+  toggleColorVisibility: (index: number) => void
+  mergeColors: (sourceIndex: number, targetIndex: number) => void
   updateConfig: (patch: Partial<PuzzleConfig>) => void
   reset: () => void
 }
@@ -222,6 +224,73 @@ export function PuzzleProvider({ children }: { children: React.ReactNode }) {
     })
   }, [])
 
+  const toggleColorVisibility = useCallback((index: number) => {
+    setMatrix((prev) => {
+      if (!prev) return prev
+      const newPalette = [...prev.palette]
+      newPalette[index] = { ...newPalette[index], ignored: !newPalette[index].ignored }
+      return { ...prev, palette: newPalette }
+    })
+  }, [])
+
+  const mergeColors = useCallback((sourceIndex: number, targetIndex: number) => {
+    if (sourceIndex === targetIndex) return
+    setMatrix((prev) => {
+      if (!prev) return prev
+      
+      const newCells = prev.cells.map(col => col.map(c => ({...c})))
+      const targetHex = prev.palette[targetIndex].hex
+      const targetLabel = prev.palette[targetIndex].label
+      
+      let movedCount = 0
+      
+      // Update cells
+      for (let x = 0; x < prev.width; x++) {
+        for (let y = 0; y < prev.height; y++) {
+          if (newCells[x][y].colorIndex === sourceIndex) {
+            newCells[x][y].colorIndex = targetIndex
+            newCells[x][y].hexColor = targetHex
+            newCells[x][y].label = targetLabel
+            movedCount++
+          } else if (newCells[x][y].colorIndex > sourceIndex) {
+            // Shift color indices down for colors that come after the deleted source color
+            newCells[x][y].colorIndex--
+          }
+        }
+      }
+      
+      // Remove the source color from the palette completely
+      const newPalette = prev.palette.filter((_, i) => i !== sourceIndex).map((p, i) => {
+        // Re-index since we removed one
+        const updated = { ...p, index: i }
+        if (p.index === targetIndex || p.index === targetIndex - (targetIndex > sourceIndex ? 1 : 0)) {
+          // Note: if targetIndex > sourceIndex, the target's index will shift down by 1 in the new array.
+          // Wait, p.index here is the OLD index? No, we mapped it to `i`. 
+        }
+        return updated
+      })
+      
+      // Update counts for the merged target
+      const adjustedTargetIndex = targetIndex > sourceIndex ? targetIndex - 1 : targetIndex
+      newPalette[adjustedTargetIndex].count += movedCount
+      
+      // Recalculate coverage for all
+      const totalPixels = prev.width * prev.height
+      for (const p of newPalette) {
+         p.coverage = p.count / totalPixels
+      }
+      
+      // Fix activeColorIndex if it was pointing to the deleted one or one after it
+      setActiveColorIndex(curr => {
+        if (curr === sourceIndex) return adjustedTargetIndex
+        if (curr > sourceIndex) return curr - 1
+        return curr
+      })
+      
+      return { ...prev, cells: newCells, palette: newPalette }
+    })
+  }, [])
+
   const reset = useCallback(() => {
     setMatrix(null)
     setImageData(null)
@@ -259,6 +328,8 @@ export function PuzzleProvider({ children }: { children: React.ReactNode }) {
     updatePaletteColor,
     addPaletteColor,
     paintCell,
+    toggleColorVisibility,
+    mergeColors,
     loadCroppedImage,
     updateConfig,
     reset,

@@ -3,11 +3,18 @@
 import { useEffect, useRef, useState } from "react"
 import { usePuzzle } from "@/components/puzzle-context"
 import { contrastText } from "@/lib/image-processing"
-import { Plus } from "lucide-react"
+import { Plus, Eye, EyeOff, GitMerge } from "lucide-react"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
+import type { PaletteColor } from "@/lib/types"
 import type { PaletteColor } from "@/lib/types"
 
 function ColorLegendRow({ c }: { c: PaletteColor }) {
-  const { paintMode, activeColorIndex, setActiveColorIndex, updatePaletteColor } = usePuzzle()
+  const { paintMode, activeColorIndex, setActiveColorIndex, updatePaletteColor, toggleColorVisibility, mergeColors, matrix } = usePuzzle()
   const [localHex, setLocalHex] = useState(c.hex)
   const timerRef = useRef<NodeJS.Timeout | null>(null)
 
@@ -46,7 +53,7 @@ function ColorLegendRow({ c }: { c: PaletteColor }) {
         }
       }}
     >
-      <td className="px-2 py-2">
+      <td className="px-1.5 py-2">
         <span
           className="flex size-6 items-center justify-center rounded-md text-xs font-bold tabular-nums transition-colors"
           style={{ backgroundColor: localHex, color: contrastText(...c.rgb) }}
@@ -54,7 +61,7 @@ function ColorLegendRow({ c }: { c: PaletteColor }) {
           {c.label}
         </span>
       </td>
-      <td className="px-2 py-2">
+      <td className="px-1.5 py-2">
         <div className="flex items-center gap-2">
           <div
             className="relative size-5 overflow-hidden rounded-sm border border-border/60 transition-colors"
@@ -72,11 +79,54 @@ function ColorLegendRow({ c }: { c: PaletteColor }) {
           <code className="text-xs text-muted-foreground">{localHex.toUpperCase()}</code>
         </div>
       </td>
-      <td className="px-2 py-2 text-right tabular-nums text-muted-foreground">
+      <td className="px-1.5 py-2 text-right tabular-nums text-muted-foreground">
         {c.count.toLocaleString()}
       </td>
-      <td className="px-2 py-2 text-right tabular-nums font-medium">
+      <td className="px-1.5 py-2 text-right tabular-nums font-medium">
         {(c.coverage * 100).toFixed(1)}%
+      </td>
+      <td className="px-1.5 py-2">
+        <div className="flex items-center justify-end gap-1">
+          <button
+            onClick={(e) => {
+              e.stopPropagation()
+              toggleColorVisibility(c.index)
+            }}
+            className="rounded p-1.5 text-muted-foreground hover:bg-muted/50 hover:text-foreground"
+            title={c.ignored ? "Show tiles" : "Hide tiles (skip printing)"}
+          >
+            {c.ignored ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
+          </button>
+          
+          <DropdownMenu>
+            <DropdownMenuTrigger 
+              onClick={(e) => e.stopPropagation()}
+              className="rounded p-1.5 text-muted-foreground hover:bg-muted/50 hover:text-foreground border-none bg-transparent cursor-pointer"
+              title="Merge into another color"
+            >
+              <GitMerge className="size-4" />
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-[180px]">
+              <div className="px-2 py-1.5 text-xs font-semibold text-muted-foreground">Merge into...</div>
+              {matrix?.palette.filter(target => target.index !== c.index).map((target) => (
+                <DropdownMenuItem
+                  key={target.index}
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    mergeColors(c.index, target.index)
+                  }}
+                  className="gap-2 text-xs cursor-pointer"
+                >
+                  <span
+                    className="size-3 rounded-full border border-border/60"
+                    style={{ backgroundColor: target.hex }}
+                  />
+                  {target.label} ({target.hex.toUpperCase()})
+                </DropdownMenuItem>
+              ))}
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </div>
       </td>
     </tr>
   )
@@ -103,14 +153,15 @@ export function ColorLegend() {
 
   return (
     <div className="flex flex-col gap-2">
-      <div className="overflow-hidden rounded-lg border">
+      <div className="overflow-x-auto overflow-y-hidden rounded-lg border scrollbar-thin">
         <table className="w-full text-sm">
           <thead>
             <tr className="border-b bg-muted/50 text-left text-[11px] uppercase tracking-wide text-muted-foreground">
-              <th className="px-2 py-2 font-medium">Key</th>
-              <th className="px-2 py-2 font-medium">Color</th>
-              <th className="px-2 py-2 text-right font-medium">Pixels</th>
-              <th className="px-2 py-2 text-right font-medium">Cover</th>
+              <th className="px-1.5 py-2 font-medium">Key</th>
+              <th className="px-1.5 py-2 font-medium">Color</th>
+              <th className="px-1.5 py-2 text-right font-medium">Pixels</th>
+              <th className="px-1.5 py-2 text-right font-medium">Cover</th>
+              <th className="px-1.5 py-2 text-right font-medium">Actions</th>
             </tr>
           </thead>
           <tbody>
