@@ -1,6 +1,6 @@
 "use client"
 import { useEffect } from "react"
-import { Grid2x2, Palette, Paintbrush } from "lucide-react"
+import { Grid2x2, Palette, Paintbrush, Undo, Redo } from "lucide-react"
 import { ColorLegend } from "@/components/color-legend"
 import { ExportBar } from "@/components/export-bar"
 import { PrintConfig } from "@/components/print-config"
@@ -13,8 +13,29 @@ import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { MAX_COLORS, MIN_COLORS, BasePlateSize } from "@/lib/types"
 
 export function ControlPanel() {
-  const { config, updateConfig, hasImage, processing, paintMode, setPaintMode } = usePuzzle()
+  const { config, updateConfig, hasImage, processing, paintMode, setPaintMode, undo, redo, canUndo, canRedo } = usePuzzle()
   const disabled = !hasImage
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Don't trigger if the user is typing in an input
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return
+      
+      if (e.ctrlKey || e.metaKey) {
+        if (e.key === 'z' || e.key === 'Z') {
+          if (e.shiftKey) {
+            redo()
+          } else {
+            undo()
+          }
+        } else if (e.key === 'y' || e.key === 'Y') {
+          redo()
+        }
+      }
+    }
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [undo, redo])
 
   const maxRatioDim = Math.max(config.cropRatio.w, config.cropRatio.h)
   const maxMultiplier = Math.max(1, Math.floor(4 / maxRatioDim))
@@ -28,13 +49,34 @@ export function ControlPanel() {
 
   return (
     <aside className="flex h-full w-full flex-col gap-5 overflow-y-auto border-r bg-sidebar p-4 lg:w-[340px] lg:shrink-0">
-      <div className="flex flex-col gap-1">
-        <h1 className="text-base font-semibold tracking-tight text-sidebar-foreground">
-          Pixel Puzzle Maker
-        </h1>
-        <p className="text-xs text-muted-foreground">
-          Photo to 3D-printable waffle tray &amp; tiles.
-        </p>
+      <div className="flex items-center justify-between">
+        <div className="flex flex-col gap-1">
+          <h1 className="text-base font-semibold tracking-tight text-sidebar-foreground">
+            Pixel Puzzle Maker
+          </h1>
+          <p className="text-xs text-muted-foreground">
+            Photo to 3D-printable waffle tray &amp; tiles.
+          </p>
+        </div>
+        
+        <div className="flex items-center gap-1">
+          <button
+            onClick={undo}
+            disabled={!canUndo}
+            className="rounded p-1.5 text-muted-foreground hover:bg-muted/50 hover:text-foreground disabled:opacity-30 disabled:pointer-events-none"
+            title="Undo (Ctrl+Z)"
+          >
+            <Undo className="size-4" />
+          </button>
+          <button
+            onClick={redo}
+            disabled={!canRedo}
+            className="rounded p-1.5 text-muted-foreground hover:bg-muted/50 hover:text-foreground disabled:opacity-30 disabled:pointer-events-none"
+            title="Redo (Ctrl+Y)"
+          >
+            <Redo className="size-4" />
+          </button>
+        </div>
       </div>
 
       <UploadZone />

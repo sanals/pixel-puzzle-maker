@@ -40,6 +40,10 @@ interface PuzzleContextValue {
   loadCroppedImage: (url: string, fileName: string) => void
   toggleColorVisibility: (index: number) => void
   mergeColors: (sourceIndex: number, targetIndex: number) => void
+  canUndo: boolean
+  canRedo: boolean
+  undo: () => void
+  redo: () => void
   updateConfig: (patch: Partial<PuzzleConfig>) => void
   reset: () => void
 }
@@ -69,6 +73,12 @@ export function PuzzleProvider({ children }: { children: React.ReactNode }) {
   const [paintMode, setPaintMode] = useState(false)
   const [activeColorIndex, setActiveColorIndex] = useState(0)
 
+  // --- History State for Undo/Redo ---
+  const historyRef = useRef<VoxelMatrix[]>([])
+  const historyIndexRef = useRef<number>(-1)
+  const [canUndo, setCanUndo] = useState(false)
+  const [canRedo, setCanRedo] = useState(false)
+
   const workerRef = useRef<Worker | null>(null)
   const requestId = useRef(0)
 
@@ -81,6 +91,10 @@ export function PuzzleProvider({ children }: { children: React.ReactNode }) {
       setProcessing(false)
       if (data.type === "result") {
         setMatrix(data.matrix)
+        historyRef.current = [data.matrix]
+        historyIndexRef.current = 0
+        setCanUndo(false)
+        setCanRedo(false)
         setPaintMode(false)
         setActiveColorIndex(0)
       } else if (data.type === "error") {
@@ -158,24 +172,41 @@ export function PuzzleProvider({ children }: { children: React.ReactNode }) {
     })
   }, [])
 
+  const applyMatrixUpdate = useCallback((updater: (prev: VoxelMatrix) => VoxelMatrix) => {
+    const current = historyRef.current[historyIndexRef.current]
+    if (!current) return
+    const next = updater(current)
+    if (next === current) return
+    
+    const currentIdx = historyIndexRef.current
+    if (currentIdx < historyRef.current.length - 1) {
+      historyRef.current = historyRef.current.slice(0, currentIdx + 1)
+    }
+    historyRef.current.push(next)
+    if (historyRef.current.length > 20) {
+      historyRef.current.shift()
+    } else {
+      historyIndexRef.current += 1
+    }
+    
+    setCanUndo(historyIndexRef.current > 0)
+    setCanRedo(false)
+    setMatrix(next)
+  }, [])
+
   const updatePaletteColor = useCallback((index: number, hex: string) => {
-    setMatrix((prev) => {
-      if (!prev) return prev
+    applyMatrixUpdate((prev) => {
       const newPalette = [...prev.palette]
       newPalette[index] = { ...newPalette[index], hex, rgb: hexToRgb(hex) }
       return { ...prev, palette: newPalette }
     })
-  }, [])
+  }, [applyMatrixUpdate])
 
   const addPaletteColor = useCallback((hex: string) => {
-    setMatrix((prev) => {
-      if (!prev) return prev
+    applyMatrixUpdate((prev) => {
       const newPalette = [...prev.palette]
       const newIndex = newPalette.length
       
-      // Basic label generator for custom colors: AA, AB, etc. if we exceed Z.
-      // But we can just use the labelForIndex logic from image-processing if we had it exported,
-      // or a simple inline one for now:
       let label = ""
       let n = newIndex
       do {
@@ -193,13 +224,11 @@ export function PuzzleProvider({ children }: { children: React.ReactNode }) {
       })
       return { ...prev, palette: newPalette }
     })
-  }, [])
+  }, [applyMatrixUpdate])
 
   const paintCell = useCallback((x: number, y: number, colorIndex: number) => {
-    setMatrix((prev) => {
-      if (!prev) return prev
+    applyMatrixUpdate((prev) => {
       if (x < 0 || x >= prev.width || y < 0 || y >= prev.height) return prev
-
       const oldColorIndex = prev.cells[x][y].colorIndex
       if (oldColorIndex === colorIndex) return prev
 
@@ -222,29 +251,25 @@ export function PuzzleProvider({ children }: { children: React.ReactNode }) {
 
       return { ...prev, cells: newCells, palette: newPalette }
     })
-  }, [])
+  }, [applyMatrixUpdate])
 
   const toggleColorVisibility = useCallback((index: number) => {
-    setMatrix((prev) => {
-      if (!prev) return prev
+    applyMatrixUpdate((prev) => {
       const newPalette = [...prev.palette]
       newPalette[index] = { ...newPalette[index], ignored: !newPalette[index].ignored }
       return { ...prev, palette: newPalette }
     })
-  }, [])
+  }, [applyMatrixUpdate])
 
   const mergeColors = useCallback((sourceIndex: number, targetIndex: number) => {
     if (sourceIndex === targetIndex) return
-    setMatrix((prev) => {
-      if (!prev) return prev
-      
+    applyMatrixUpdate((prev) => {
       const newCells = prev.cells.map(col => col.map(c => ({...c})))
       const targetHex = prev.palette[targetIndex].hex
       const targetLabel = prev.palette[targetIndex].label
       
       let movedCount = 0
       
-      // Update cells
       for (let x = 0; x < prev.width; x++) {
         for (let y = 0; y < prev.height; y++) {
           if (newCells[x][y].colorIndex === sourceIndex) {
@@ -253,34 +278,23 @@ export function PuzzleProvider({ children }: { children: React.ReactNode }) {
             newCells[x][y].label = targetLabel
             movedCount++
           } else if (newCells[x][y].colorIndex > sourceIndex) {
-            // Shift color indices down for colors that come after the deleted source color
             newCells[x][y].colorIndex--
           }
         }
       }
       
-      // Remove the source color from the palette completely
       const newPalette = prev.palette.filter((_, i) => i !== sourceIndex).map((p, i) => {
-        // Re-index since we removed one
-        const updated = { ...p, index: i }
-        if (p.index === targetIndex || p.index === targetIndex - (targetIndex > sourceIndex ? 1 : 0)) {
-          // Note: if targetIndex > sourceIndex, the target's index will shift down by 1 in the new array.
-          // Wait, p.index here is the OLD index? No, we mapped it to `i`. 
-        }
-        return updated
+        return { ...p, index: i }
       })
       
-      // Update counts for the merged target
       const adjustedTargetIndex = targetIndex > sourceIndex ? targetIndex - 1 : targetIndex
       newPalette[adjustedTargetIndex].count += movedCount
       
-      // Recalculate coverage for all
       const totalPixels = prev.width * prev.height
       for (const p of newPalette) {
          p.coverage = p.count / totalPixels
       }
       
-      // Fix activeColorIndex if it was pointing to the deleted one or one after it
       setActiveColorIndex(curr => {
         if (curr === sourceIndex) return adjustedTargetIndex
         if (curr > sourceIndex) return curr - 1
@@ -289,6 +303,24 @@ export function PuzzleProvider({ children }: { children: React.ReactNode }) {
       
       return { ...prev, cells: newCells, palette: newPalette }
     })
+  }, [applyMatrixUpdate])
+
+  const undo = useCallback(() => {
+    if (historyIndexRef.current > 0) {
+      historyIndexRef.current -= 1
+      setMatrix(historyRef.current[historyIndexRef.current])
+      setCanUndo(historyIndexRef.current > 0)
+      setCanRedo(historyIndexRef.current < historyRef.current.length - 1)
+    }
+  }, [])
+
+  const redo = useCallback(() => {
+    if (historyIndexRef.current < historyRef.current.length - 1) {
+      historyIndexRef.current += 1
+      setMatrix(historyRef.current[historyIndexRef.current])
+      setCanUndo(historyIndexRef.current > 0)
+      setCanRedo(historyIndexRef.current < historyRef.current.length - 1)
+    }
   }, [])
 
   const reset = useCallback(() => {
@@ -297,6 +329,10 @@ export function PuzzleProvider({ children }: { children: React.ReactNode }) {
     setFileName(null)
     setPaintMode(false)
     setActiveColorIndex(0)
+    historyRef.current = []
+    historyIndexRef.current = -1
+    setCanUndo(false)
+    setCanRedo(false)
     setImageUrl((prev) => {
       if (prev) URL.revokeObjectURL(prev)
       return null
@@ -330,6 +366,10 @@ export function PuzzleProvider({ children }: { children: React.ReactNode }) {
     paintCell,
     toggleColorVisibility,
     mergeColors,
+    canUndo,
+    canRedo,
+    undo,
+    redo,
     loadCroppedImage,
     updateConfig,
     reset,
