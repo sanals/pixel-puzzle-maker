@@ -372,9 +372,6 @@ export async function build3MF(assets: ExportAssets, options: { bedWidth?: numbe
     const col = plateIdx % columns
     const row = Math.floor(plateIdx / columns)
 
-    // 1. Merge all instances into a single massive geometry
-    const clonedGeoms: THREE.BufferGeometry[] = []
-
     // Force the source geometry to be non-indexed so mergeBufferGeometries doesn't complain about mixed attributes
     let sourceGeo = grp.geometry
     if (sourceGeo.index) sourceGeo = sourceGeo.toNonIndexed()
@@ -387,31 +384,9 @@ export async function build3MF(assets: ExportAssets, options: { bedWidth?: numbe
 
     if (grp.instances.length === 0) continue
 
-    for (let i = 0; i < grp.instances.length; i++) {
-      const m = grp.instances[i]
-      const geo = sourceGeo.clone()
-      geo.applyMatrix4(m)
-      clonedGeoms.push(geo)
-      // Yield periodically to prevent UI lockup on massive 96x96 boards
-      if (i > 0 && i % 1000 === 0) await yieldToMain()
-    }
-
-    await yieldToMain()
-    let mergedSoup = mergeBufferGeometries(clonedGeoms)
-    if (!mergedSoup) continue
-
     // 2. Weld all perfectly touching faces together to satisfy Bambu Studio
     await yieldToMain()
-    let exportGeo = BufferGeometryUtils.mergeVertices(mergedSoup, 1e-4)
-
-    // 3. Compute Bounding Box to center it
-    exportGeo.computeBoundingBox()
-    const bbox = exportGeo.boundingBox!
-    const cx = (bbox.min.x + bbox.max.x) / 2
-    const cy = (bbox.min.z + bbox.max.z) / 2 // Z-up is -worldZ, but bounding box is Y-up Z
-
-    // 4. Translate to origin so it can be placed properly on the plate
-    exportGeo.translate(-cx, 0, -cy)
+    let exportGeo = BufferGeometryUtils.mergeVertices(sourceGeo, 1e-4)
 
     const p = exportGeo.getAttribute("position")
     const verts: string[] = []
@@ -430,10 +405,10 @@ export async function build3MF(assets: ExportAssets, options: { bedWidth?: numbe
       if (i > 0 && i % 50000 === 0) await yieldToMain()
     }
 
-    const masterId = nextObjectId++
+    const baseId = nextObjectId++
 
     objects.push(
-      `    <object id="${masterId}" p:UUID="${generateUUID()}" type="model">\n` +
+      `    <object id="${baseId}" p:UUID="${generateUUID()}" type="model">\n` +
       `      <mesh>\n` +
       `        <vertices>${verts.join("")}</vertices>\n` +
       `        <triangles>${tris.join("")}</triangles>\n` +
@@ -441,18 +416,69 @@ export async function build3MF(assets: ExportAssets, options: { bedWidth?: numbe
       `    </object>`
     )
 
+    exportGeo.computeBoundingBox()
+    const bbox = exportGeo.boundingBox!
+    let minX = Infinity, maxX = -Infinity, minZ = Infinity, maxZ = -Infinity
+    
+    // We only need 4 corners of the XZ bounding box since we only care about X and Z centering
+    const corners = [
+      new THREE.Vector3(bbox.min.x, 0, bbox.min.z),
+      new THREE.Vector3(bbox.max.x, 0, bbox.min.z),
+      new THREE.Vector3(bbox.min.x, 0, bbox.max.z),
+      new THREE.Vector3(bbox.max.x, 0, bbox.max.z)
+    ]
+
+    const groupId = nextObjectId++
+    const components: string[] = []
+    for (let i = 0; i < grp.instances.length; i++) {
+      const e = grp.instances[i].elements
+
+      for (const corner of corners) {
+        const v = corner.clone().applyMatrix4(grp.instances[i])
+        if (v.x < minX) minX = v.x
+        if (v.x > maxX) maxX = v.x
+        if (v.z < minZ) minZ = v.z
+        if (v.z > maxZ) maxZ = v.z
+      }
+
+      // ThreeJS Matrix4 is column-major.
+      // Convert to 3MF Transform string, mapping Y-up to Z-up: X3=X, Y3=-Z, Z3=Y
+      const tStr = [
+        e[0], -e[2], e[1],
+        -e[8], e[10], -e[9],
+        e[4], -e[6], e[5],
+        e[12], -e[14], e[13]
+      ].map(fmt).join(" ")
+      
+      components.push(`        <component objectid="${baseId}" transform="${tStr}"/>`)
+      if (i > 0 && i % 5000 === 0) await yieldToMain()
+    }
+    
+    objects.push(
+      `    <object id="${groupId}" p:UUID="${generateUUID()}" type="model">\n` +
+      `      <components>\n` +
+      components.join("\n") +
+      `\n      </components>\n` +
+      `    </object>`
+    )
+
+    const cx = (minX + maxX) / 2
+    const cz = (minZ + maxZ) / 2
+
     const globalX = col * PLATE_SPACING
     const globalY = -row * PLATE_SPACING
-    buildItems.push(`    <item objectid="${masterId}" p:UUID="${generateUUID()}" transform="1 0 0 0 1 0 0 0 1 ${globalX + plateSize / 2} ${globalY + plateSize / 2} 0" printable="1"/>`)
+    const itemX = globalX + plateSize / 2 - cx
+    const itemY = globalY + plateSize / 2 + cz
+    buildItems.push(`    <item objectid="${groupId}" p:UUID="${generateUUID()}" transform="1 0 0 0 1 0 0 0 1 ${itemX} ${itemY} 0" printable="1"/>`)
 
     const cleanName = grp.name.replace(/[^a-zA-Z0-9_\- ]/g, "")
 
     const extruderIndex = uniqueColors.indexOf(grp.color) + 1
     modelSettingsObjects.push(`
-  <object id="${masterId}">
+  <object id="${groupId}">
     <metadata key="name" value="${cleanName}"/>
     <metadata key="extruder" value="${extruderIndex}"/>
-    <part id="${masterId}" subtype="normal_part">
+    <part id="${groupId}" subtype="normal_part">
       <metadata key="name" value="${cleanName}"/>
       <metadata key="matrix" value="1 0 0 ${plateSize / 2} 0 1 0 ${plateSize / 2} 0 0 1 0 0 0 0 1"/>
       <metadata key="source_file" value="${cleanName}.model"/>
@@ -470,7 +496,7 @@ export async function build3MF(assets: ExportAssets, options: { bedWidth?: numbe
     <metadata key="plater_name" value="${cleanName}"/>
     <metadata key="locked" value="false"/>
     <model_instance>
-      <metadata key="object_id" value="${masterId}"/>
+      <metadata key="object_id" value="${groupId}"/>
       <metadata key="instance_id" value="0"/>
     </model_instance>
   </plate>`)
