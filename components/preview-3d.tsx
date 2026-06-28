@@ -139,7 +139,7 @@ export function Preview3D({ layout, palette, embossing }: Preview3DProps) {
            const placements = intersect.object.userData.placements
            if (placements && placements[intersect.instanceId]) {
              const p = placements[intersect.instanceId]
-             stateRef.current.paintCell(p.gridX, p.gridY, stateRef.current.activeColorIndex)
+             stateRef.current.paintCell(p.gx, p.gy, stateRef.current.activeColorIndex)
              break
            }
         }
@@ -162,6 +162,8 @@ export function Preview3D({ layout, palette, embossing }: Preview3DProps) {
     }
   }, [])
 
+  const lastSpanRef = useRef<number | null>(null)
+
   // 2. Build Puzzle Geometries and update Camera/Lights based on Layout
   useEffect(() => {
     const scene = sceneRef.current
@@ -170,24 +172,29 @@ export function Preview3D({ layout, palette, embossing }: Preview3DProps) {
     if (!scene || !camera || !controls) return
 
     const span = Math.max(layout.boardWidth, layout.boardDepth)
-    camera.position.set(span * 0.75, span * 0.85, span * 0.95)
-    controls.target.set(0, layout.baseHeight, 0)
     
-    if (scene.userData.keyLight) {
-       const key = scene.userData.keyLight as THREE.DirectionalLight
-       key.position.set(span * 0.6, span * 1.2, span * 0.4)
-       const d = span * 0.9
-       key.shadow.camera.left = -d
-       key.shadow.camera.right = d
-       key.shadow.camera.top = d
-       key.shadow.camera.bottom = -d
-       key.shadow.camera.far = span * 4
-       key.shadow.camera.updateProjectionMatrix()
-    }
-    
-    if (scene.userData.fillLight) {
-       const fill = scene.userData.fillLight as THREE.DirectionalLight
-       fill.position.set(-span * 0.5, span * 0.4, -span * 0.6)
+    // Only reset camera and lights if the physical size of the board changes
+    if (lastSpanRef.current !== span) {
+      lastSpanRef.current = span
+      camera.position.set(span * 0.75, span * 0.85, span * 0.95)
+      controls.target.set(0, layout.baseHeight, 0)
+      
+      if (scene.userData.keyLight) {
+         const key = scene.userData.keyLight as THREE.DirectionalLight
+         key.position.set(span * 0.6, span * 1.2, span * 0.4)
+         const d = span * 0.9
+         key.shadow.camera.left = -d
+         key.shadow.camera.right = d
+         key.shadow.camera.top = d
+         key.shadow.camera.bottom = -d
+         key.shadow.camera.far = span * 4
+         key.shadow.camera.updateProjectionMatrix()
+      }
+      
+      if (scene.userData.fillLight) {
+         const fill = scene.userData.fillLight as THREE.DirectionalLight
+         fill.position.set(-span * 0.5, span * 0.4, -span * 0.6)
+      }
     }
 
     let currentDispose: (() => void) | null = null
