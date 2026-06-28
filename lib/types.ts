@@ -45,6 +45,8 @@ export interface PaletteColor {
   count: number
   /** Surface coverage as a fraction 0..1. */
   coverage: number
+  /** Whether the color should be ignored */
+  ignored?: boolean
 }
 
 /** A single logical cell in the voxel matrix. */

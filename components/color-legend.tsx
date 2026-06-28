@@ -11,9 +11,8 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import type { PaletteColor } from "@/lib/types"
-import type { PaletteColor } from "@/lib/types"
 
-function ColorLegendRow({ c }: { c: PaletteColor }) {
+function ColorLegendRow({ c }: { readonly c: PaletteColor }) {
   const { paintMode, activeColorIndex, setActiveColorIndex, updatePaletteColor, toggleColorVisibility, mergeColors, matrix } = usePuzzle()
   const [localHex, setLocalHex] = useState(c.hex)
   const timerRef = useRef<NodeJS.Timeout | null>(null)

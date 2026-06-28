@@ -13,6 +13,9 @@ import { mergeBufferGeometries, TextGeometry } from "three-stdlib"
 const TRAY_COLOR = "#cbd5e1"
 import * as BufferGeometryUtils from "three/examples/jsm/utils/BufferGeometryUtils.js"
 
+// Helper to prevent UI freezing during heavy processing
+const yieldToMain = () => new Promise<void>(resolve => setTimeout(resolve, 0))
+
 /** A template mesh with a list of instance transforms. */
 export interface InstancedExport {
   name: string
@@ -153,7 +156,9 @@ export async function assembleExportAssets(
             baseBrush.applyMatrix4(mTray)
             baseBrush.updateMatrixWorld()
 
+            await yieldToMain()
             const result = localEvaluator.evaluate(baseBrush, textBrush, textOp)
+            await yieldToMain()
 
             // Revert back to local origin so the instance matrix works seamlessly
             const invTray = mTray.clone().invert()
@@ -362,7 +367,8 @@ export async function build3MF(assets: ExportAssets, options: { bedWidth?: numbe
 
   let nextObjectId = 2 // 1 is reserved for basematerials
 
-  groups.forEach((grp, plateIdx) => {
+  for (let plateIdx = 0; plateIdx < groups.length; plateIdx++) {
+    const grp = groups[plateIdx]
     const col = plateIdx % columns
     const row = Math.floor(plateIdx / columns)
 
@@ -379,18 +385,23 @@ export async function build3MF(assets: ExportAssets, options: { bedWidth?: numbe
       if (key !== 'position') sourceGeo.deleteAttribute(key)
     })
 
-    if (grp.instances.length === 0) return
+    if (grp.instances.length === 0) continue
 
-    for (const m of grp.instances) {
+    for (let i = 0; i < grp.instances.length; i++) {
+      const m = grp.instances[i]
       const geo = sourceGeo.clone()
       geo.applyMatrix4(m)
       clonedGeoms.push(geo)
+      // Yield periodically to prevent UI lockup on massive 96x96 boards
+      if (i > 0 && i % 1000 === 0) await yieldToMain()
     }
 
+    await yieldToMain()
     let mergedSoup = mergeBufferGeometries(clonedGeoms)
-    if (!mergedSoup) return
+    if (!mergedSoup) continue
 
     // 2. Weld all perfectly touching faces together to satisfy Bambu Studio
+    await yieldToMain()
     let exportGeo = BufferGeometryUtils.mergeVertices(mergedSoup, 1e-4)
 
     // 3. Compute Bounding Box to center it
@@ -408,12 +419,15 @@ export async function build3MF(assets: ExportAssets, options: { bedWidth?: numbe
 
     for (let i = 0; i < p.count; i++) {
       verts.push(`<vertex x="${fmt(p.getX(i))}" y="${fmt(-p.getZ(i))}" z="${fmt(p.getY(i))}"/>`)
+      if (i > 0 && i % 50000 === 0) await yieldToMain()
     }
 
+    await yieldToMain()
     const colorIndex = uniqueColors.indexOf(grp.color)
     const index = exportGeo.index!
     for (let i = 0; i < index.count; i += 3) {
       tris.push(`<triangle v1="${index.getX(i)}" v2="${index.getX(i + 1)}" v3="${index.getX(i + 2)}" pid="1" p1="${colorIndex}"/>`)
+      if (i > 0 && i % 50000 === 0) await yieldToMain()
     }
 
     const masterId = nextObjectId++
@@ -460,7 +474,7 @@ export async function build3MF(assets: ExportAssets, options: { bedWidth?: numbe
       <metadata key="instance_id" value="0"/>
     </model_instance>
   </plate>`)
-  })
+  }
 
   const modelChunks: string[] = []
   modelChunks.push(
@@ -743,5 +757,6 @@ export function downloadBlob(data: Blob | ArrayBuffer, filename: string): void {
   document.body.appendChild(a)
   a.click()
   a.remove()
-  setTimeout(() => URL.revokeObjectURL(url), 1000)
+  // Increase timeout to 5 minutes so users with large files or slow disks don't get NotReadableError
+  setTimeout(() => URL.revokeObjectURL(url), 300000)
 }
