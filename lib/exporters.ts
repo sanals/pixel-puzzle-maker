@@ -606,7 +606,12 @@ export async function build3MF(assets: ExportAssets, options: { bedWidth?: numbe
   zip.folder("Metadata")!.file("project_settings.config", projectSettingsXml)
   zip.folder("Metadata")!.file("slice_info.config", sliceInfoXml)
 
-  return zip.generateAsync({ type: "blob", mimeType: "model/3mf" })
+  return zip.generateAsync({ 
+    type: "blob", 
+    mimeType: "application/zip",
+    compression: "DEFLATE",
+    compressionOptions: { level: 6 }
+  })
 }
 
 function fmt(n: number): string {
@@ -703,7 +708,12 @@ async function buildBaked3MF(meshes: BakedMesh[]): Promise<Blob> {
   zip.file("[Content_Types].xml", contentTypes)
   zip.folder("_rels")!.file(".rels", rels)
   zip.folder("3D")!.file("3dmodel.model", modelXml)
-  return zip.generateAsync({ type: "blob", mimeType: "model/3mf" })
+  return zip.generateAsync({ 
+    type: "blob", 
+    mimeType: "model/3mf",
+    compression: "DEFLATE",
+    compressionOptions: { level: 6 }
+  })
 }
 
 /** Bundle 3MF files into a ZIP (ideal for printing color-by-color separated plates). */
