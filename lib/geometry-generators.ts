@@ -216,9 +216,6 @@ export function createTrayGeometry(
   return merged!
 }
 
-
-
-/** Generate a crisp alpha texture for a single character label. */
 export function createLabelTexture(label: string, fg: string, bg?: string): THREE.CanvasTexture {
   const px = 128
   const canvas = document.createElement("canvas")
@@ -275,9 +272,9 @@ export async function buildPuzzleGroup(
   const TRAY_SIZE = layout.basePlateSize * layout.pitch
   const numBoardsX = Math.ceil(layout.boardWidth / TRAY_SIZE)
   const numBoardsZ = Math.ceil(layout.boardDepth / TRAY_SIZE)
-
+  
   if (assets) {
-    const baseGeo = assets.base // DO NOT CLONE or track for disposal to save massive CPU/GPU re-allocation!
+    const baseGeo = assets.base // DO NOT CLONE or track STL to save massive CPU/GPU re-allocation!
     const trayMat = track(
       new THREE.MeshStandardMaterial({ color: trayColor, roughness: 0.9, metalness: 0.02 }),
     )

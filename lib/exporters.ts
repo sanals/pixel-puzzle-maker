@@ -3,8 +3,8 @@
 import JSZip from "jszip"
 import * as THREE from "three"
 import type { SplitPlan } from "./board-splitter"
-import { createConnectorPegGeometry } from "./board-splitter"
-import { createTrayGeometry, createTileGeometry, getFont } from "./geometry-generators"
+
+import { getFont, loadMasterAssets } from "./geometry-generators"
 import type { GridLayout } from "./grid-engine"
 import type { EmbossingStyle, PaletteColor } from "./types"
 import { Brush, Evaluator, SUBTRACTION, ADDITION } from "three-bvh-csg"
@@ -59,8 +59,6 @@ export interface ExportAssets {
   connectors: InstancedExport | null
   texts: InstancedExport[]
 }
-
-import { loadMasterAssets } from "./geometry-generators"
 
 /** Build all instanced geometry for export. */
 export async function assembleExportAssets(

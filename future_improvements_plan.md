@@ -1,50 +1,47 @@
 # Pixel Puzzle Maker: Next Steps & Feature Plan
 
-## 1. Background Removal Feature
-
-There are two primary ways to approach removing the background so users don't have to print useless background tiles:
-
-### Option A: Palette-Based Toggle (Recommended for V1)
-- **How it works:** In the UI's "Palette Legend", we add a "Visibility" eye icon next to each extracted color. 
-- **Implementation:** 
-  - The user can click the icon to toggle a specific color off (e.g., clicking off the massive blue background).
-  - During the 3MF export and 3D preview generation, the engine simply skips generating instances for any pixel mapped to a hidden color.
-- **Pros:** Very easy to implement, gives the user total manual control, no heavy dependencies.
-- **Cons:** Only works well if the background is a solid color or mostly one shade.
-
-### Option B: AI-Powered Background Removal (Advanced)
-- **How it works:** When the user uploads an image, we provide a "Remove Background" button that uses an in-browser AI model (like `@imgly/background-removal`) to strip the background.
-- **Implementation:** 
-  - The image alpha channel is modified so the background becomes perfectly transparent before we run our pixelation algorithm.
-  - The pixelation logic is updated to ignore any pixel with an Alpha value of 0.
-- **Pros:** Feels like magic. Works on complex photos (e.g., isolating a pet from a messy living room).
-- **Cons:** Adds a heavy ML dependency to the app (the AI weights have to be downloaded by the browser on first load).
+## ✅ Completed Features
+We have successfully implemented several major features from our initial roadmap:
+- **Background Removal:** Users can toggle colors on/off via the eye icon in the palette legend, preventing massive backgrounds from being generated/exported.
+- **Manual Recolor (Paint Tool):** Added a 3D raycasting paint tool with undo functionality, allowing users to manually fix weirdly colored pixels by clicking directly on the board.
+- **Optimized 3MF Engine:** Drastically reduced export sizes from 1.6GB down to ~10MB using native JSZip DEFLATE compression and instancing.
 
 ---
 
-## 2. Additional Feature Suggestions for the App
+## ⏳ Pending Features
 
-Since you asked for suggestions on how to improve the app, here are a few high-impact ideas based on how 3D printing apps usually evolve:
-
-### A. Dynamic Base Plate Colors
-**The Problem:** If we implement Background Removal, the base plate will become highly visible since there are no tiles covering it. Currently, the base plate is always rendered and exported as dark grey/black.
+### 1. Dynamic Base Plate Colors
+**The Problem:** If a user hides a large background color, the base plate becomes highly visible. Currently, the base plate is always rendered and exported as dark grey/black.
 **The Fix:** Add a color picker in the UI that lets the user choose the base plate filament color, so it acts as a complementary backdrop to their puzzle.
 
-### B. Puzzle Fit Tolerance Slider
+### 2. Puzzle Fit Tolerance Slider
 **The Problem:** Not all 3D printers are perfectly calibrated. Some users might find the puzzle tiles are too tight to press in, while others might find them too loose.
 **The Fix:** Add a "Tile Fit Tolerance" slider (e.g., `0.05mm` to `0.20mm`). This would dynamically shrink the XY dimensions of the exported tile geometries slightly, giving users the ability to tune the "snap" feel of the puzzle.
 
-### C. Smart Bed Rotation Optimization
+### 3. Smart Bed Rotation Optimization
 **The Problem:** Right now, a `16x32` puzzle board might be split into two plates because it tries to place it vertically and exceeds the printer's Y-axis bounds.
 **The Fix:** Update the exporter algorithms to run a quick bounding-box check. If a split board doesn't fit vertically, it should try rotating the entire board 90 degrees to see if it fits horizontally before deciding to slice it onto a second physical plate.
 
-### D. Manual Recolor & Custom Palettes
-**The Problem:** The app automatically generates the color palette from the image, but users might want to tweak specific areas (e.g., fixing a weirdly colored pixel) or completely swap a generated color for a custom one that matches the actual filament they have on hand.
-**The Fix:** 
-- **Custom Colors:** Allow the user to edit the hex value of any extracted color in the palette legend, or add a brand new custom color to the palette manually.
-- **Paint Tool:** Add a "Paint" interaction mode to the 3D preview. Users can select a color from the palette, then click on individual puzzle tiles (or drag across multiple tiles) on the 3D board to manually overwrite their colors.
+### 4. Custom Hex Codes for Palettes
+**The Problem:** The app automatically generates the color palette from the image, but users might want to completely swap a generated color for a custom one that matches the actual filament spool they have on hand (e.g. swapping a dull yellow for a bright neon yellow).
+**The Fix:** Allow users to click the color square in the legend to type in their own custom Hex code.
 
 ---
 
-## Next Steps
-Let me know which Background Removal option (A or B) you prefer, and if you want to tackle any of the additional suggestions!
+## 🌟 New Feature Suggestions
+
+### 5. Magnet Holes in Base Plates (Highly Requested in 3D Printing)
+**The Concept:** A lot of enthusiasts love mounting flat puzzles or pixel art to their refrigerators or walls. 
+**The Fix:** Add an option in the UI to generate `6x2mm` or `8x3mm` negative cylindrical cutouts on the back of the base trays.
+
+### 6. Heightmap (Topological) Generation
+**The Concept:** Instead of every tile being perfectly flat, generate tiles of different heights based on pixel brightness!
+**The Fix:** Lighter colors = taller tiles (e.g. 5mm high), darker colors = shorter tiles (e.g. 3mm high). This creates a stunning 3D topological map effect that looks incredible when illuminated from the side.
+
+### 7. AI-Powered Background Removal
+**The Concept:** Instead of manually hiding colors, provide a "Remove Background" button.
+**The Fix:** Use an in-browser machine learning model (like `@imgly/background-removal`) to automatically detect the main subject (e.g., a pet) and strip the background instantly before pixelation.
+
+### 8. Save/Load Project State
+**The Concept:** Since large 96x96 puzzles take time to configure, paint, and dial in, users would benefit from being able to save their progress.
+**The Fix:** Allow users to export a lightweight `.json` file containing their image, palette, manual paint overrides, and config, which they can upload later to resume work.
