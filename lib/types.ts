@@ -24,7 +24,7 @@ export const CROP_RATIOS: CropRatio[] = [
 ]
 
 export type BasePlateSize = 16 | 24
-export type ScaleMultiplier = 1 | 2 | 3 | 4
+export type ScaleMultiplier = 1 | 2 | 3 | 4 | 5 | 6
 
 export const MIN_COLORS = 2
 export const MAX_COLORS = 16

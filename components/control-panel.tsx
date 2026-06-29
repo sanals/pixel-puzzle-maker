@@ -10,6 +10,13 @@ import { Label } from "@/components/ui/label"
 import { Separator } from "@/components/ui/separator"
 import { Slider } from "@/components/ui/slider"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { MAX_COLORS, MIN_COLORS, BasePlateSize } from "@/lib/types"
 
@@ -39,7 +46,7 @@ export function ControlPanel() {
   }, [undo, redo])
 
   const maxRatioDim = Math.max(config.cropRatio.w, config.cropRatio.h)
-  const maxMultiplier = Math.max(1, Math.floor(4 / maxRatioDim))
+  const maxMultiplier = Math.max(1, Math.floor(6 / maxRatioDim))
 
   // Ensure current multiplier is within bounds if ratio changes
   useEffect(() => {
@@ -96,38 +103,35 @@ export function ControlPanel() {
               </ToggleGroup>
             </div>
 
-            <div className="flex items-center justify-between mt-2">
-              <Label className="flex items-center gap-2 text-sm font-medium">
+            <div className="flex flex-col gap-2">
+              <Label className="flex items-center gap-2 text-sm font-medium text-muted-foreground mb-1">
                 Resolution (Blocks)
               </Label>
-              <span className="rounded-md bg-muted px-2 py-0.5 text-xs font-semibold tabular-nums text-indigo-400">
-                {config.resolutionMultiplier * config.basePlateSize * config.cropRatio.w} × {config.resolutionMultiplier * config.basePlateSize * config.cropRatio.h}
-              </span>
+              <ToggleGroup 
+                type="single"
+                value={Math.min(config.resolutionMultiplier, maxMultiplier).toString()}
+                onValueChange={(val: string) => {
+                  if (val) updateConfig({ resolutionMultiplier: parseInt(val) as any })
+                }}
+                disabled={disabled || maxMultiplier === 1}
+                className="grid grid-cols-3 gap-1.5 w-full"
+              >
+                {Array.from({ length: maxMultiplier }).map((_, i) => {
+                  const m = i + 1
+                  const w = m * config.basePlateSize * config.cropRatio.w
+                  const h = m * config.basePlateSize * config.cropRatio.h
+                  return (
+                    <ToggleGroupItem 
+                      key={m} 
+                      value={m.toString()} 
+                      className="h-9 px-2 text-xs font-medium border border-input bg-background aria-pressed:bg-indigo-600 aria-pressed:text-white hover:bg-accent aria-pressed:border-indigo-600 hover:aria-pressed:bg-indigo-600 hover:aria-pressed:text-white transition-colors"
+                    >
+                      {w} × {h}
+                    </ToggleGroupItem>
+                  )
+                })}
+              </ToggleGroup>
             </div>
-            <ToggleGroup 
-              size="sm"
-              value={[Math.min(config.resolutionMultiplier, maxMultiplier).toString()]}
-              onValueChange={(val: string[]) => {
-                if (val && val.length > 0) updateConfig({ resolutionMultiplier: parseInt(val[0]) as any })
-              }}
-              disabled={disabled || maxMultiplier === 1}
-              className="border rounded-md p-0.5 flex-wrap"
-            >
-              {Array.from({ length: maxMultiplier }).map((_, i) => {
-                const m = i + 1
-                const w = m * config.basePlateSize * config.cropRatio.w
-                const h = m * config.basePlateSize * config.cropRatio.h
-                return (
-                  <ToggleGroupItem 
-                    key={m} 
-                    value={m.toString()} 
-                    className="h-7 px-3 text-xs aria-pressed:bg-indigo-600 aria-pressed:text-white hover:aria-pressed:bg-indigo-600 hover:aria-pressed:text-white flex-1 whitespace-nowrap"
-                  >
-                    {w}x{h}
-                  </ToggleGroupItem>
-                )
-              })}
-            </ToggleGroup>
           </div>
         </TabsContent>
 
