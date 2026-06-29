@@ -1,13 +1,13 @@
 "use client"
 
-import { Box, Grid3x3, ImageIcon, Loader2 } from "lucide-react"
+import { Box, Grid3x3, ImageIcon, Loader2, Undo, Redo } from "lucide-react"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { usePuzzle } from "@/components/puzzle-context"
 import { Preview2D } from "@/components/preview-2d"
 import { Preview3D } from "@/components/preview-3d"
 
 export function PreviewPanel() {
-  const { matrix, layout, processing, config, split, hasImage } = usePuzzle()
+  const { matrix, layout, processing, config, split, hasImage, undo, redo, canUndo, canRedo } = usePuzzle()
 
   if (!hasImage || !matrix || !layout) {
     return (
@@ -31,14 +31,35 @@ export function PreviewPanel() {
     <div className="flex h-full flex-col">
       <Tabs defaultValue="3d" className="flex h-full flex-col gap-0">
         <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border px-4 py-3">
-          <TabsList>
-            <TabsTrigger value="3d" className="gap-1.5">
-              <Box className="h-4 w-4" /> 3D Preview
-            </TabsTrigger>
-            <TabsTrigger value="2d" className="gap-1.5">
-              <Grid3x3 className="h-4 w-4" /> Pixel Map
-            </TabsTrigger>
-          </TabsList>
+          <div className="flex items-center gap-2">
+            <TabsList>
+              <TabsTrigger value="3d" className="gap-1.5">
+                <Box className="h-4 w-4" /> 3D Preview
+              </TabsTrigger>
+              <TabsTrigger value="2d" className="gap-1.5">
+                <Grid3x3 className="h-4 w-4" /> Pixel Map
+              </TabsTrigger>
+            </TabsList>
+            
+            <div className="flex items-center gap-1 border-l pl-2 ml-1">
+              <button
+                onClick={undo}
+                disabled={!canUndo}
+                className="rounded p-1.5 text-muted-foreground hover:bg-muted/50 hover:text-foreground disabled:opacity-30 disabled:pointer-events-none transition-colors"
+                title="Undo (Ctrl+Z)"
+              >
+                <Undo className="size-4" />
+              </button>
+              <button
+                onClick={redo}
+                disabled={!canRedo}
+                className="rounded p-1.5 text-muted-foreground hover:bg-muted/50 hover:text-foreground disabled:opacity-30 disabled:pointer-events-none transition-colors"
+                title="Redo (Ctrl+Y)"
+              >
+                <Redo className="size-4" />
+              </button>
+            </div>
+          </div>
           <div className="flex items-center gap-4 text-xs text-muted-foreground">
             {processing && (
               <span className="flex items-center gap-1.5 text-primary">

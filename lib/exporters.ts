@@ -93,24 +93,22 @@ export async function assembleExportAssets(
 
   // Pre-generate all text geometries for each placement in world space
   const placementTexts: THREE.BufferGeometry[] = []
-  if (embossing !== "none") {
-    for (const [colorIndex, pal] of palette.entries()) {
-      if (!pal.label || pal.ignored) continue
-      const textGeo = new TextGeometry(pal.label, {
-        font, size: fontSize, height: textDepth, curveSegments: 2, bevelEnabled: false
-      })
-      textGeo.deleteAttribute('uv')
-      textGeo.center()
-      textGeo.rotateX(-Math.PI / 2)
+  for (const [colorIndex, pal] of palette.entries()) {
+    if (!pal.label || pal.ignored) continue
+    const textGeo = new TextGeometry(pal.label, {
+      font, size: fontSize, height: textDepth, curveSegments: 2, bevelEnabled: false
+    })
+    textGeo.deleteAttribute('uv')
+    textGeo.center()
+    textGeo.rotateX(-Math.PI / 2)
 
-      layout.placements.forEach((p, i) => {
-        if (p.colorIndex === colorIndex) {
-          const tGeo = textGeo.clone()
-          tGeo.translate(p.worldX, ty, p.worldZ)
-          placementTexts[i] = tGeo
-        }
-      })
-    }
+    layout.placements.forEach((p, i) => {
+      if (p.colorIndex === colorIndex) {
+        const tGeo = textGeo.clone()
+        tGeo.translate(p.worldX, ty, p.worldZ)
+        placementTexts[i] = tGeo
+      }
+    })
   }
 
   // Generate Boards (CSG merged if text is present)
@@ -133,40 +131,38 @@ export async function assembleExportAssets(
 
       let finalGeo = masterAssets.base
 
-      if (embossing !== "none") {
-        // Find which texts fall into this tray's bounding box
-        const minX = px + cx - TRAY_SIZE / 2 - 1
-        const maxX = px + cx + TRAY_SIZE / 2 + 1
-        const minZ = pz + cz - TRAY_SIZE / 2 - 1
-        const maxZ = pz + cz + TRAY_SIZE / 2 + 1
+      // Find which texts fall into this tray's bounding box
+      const minX = px + cx - TRAY_SIZE / 2 - 1
+      const maxX = px + cx + TRAY_SIZE / 2 + 1
+      const minZ = pz + cz - TRAY_SIZE / 2 - 1
+      const maxZ = pz + cz + TRAY_SIZE / 2 + 1
 
-        const localTextGeos: THREE.BufferGeometry[] = []
-        layout.placements.forEach((p, i) => {
-          if (placementTexts[i] && p.worldX >= minX && p.worldX <= maxX && p.worldZ >= minZ && p.worldZ <= maxZ) {
-            localTextGeos.push(placementTexts[i])
-          }
-        })
+      const localTextGeos: THREE.BufferGeometry[] = []
+      layout.placements.forEach((p, i) => {
+        if (placementTexts[i] && p.worldX >= minX && p.worldX <= maxX && p.worldZ >= minZ && p.worldZ <= maxZ) {
+          localTextGeos.push(placementTexts[i])
+        }
+      })
 
-        if (localTextGeos.length > 0) {
-          const textMerged = mergeBufferGeometries(localTextGeos)
-          if (textMerged) {
-            const textBrush = new Brush(textMerged)
-            textBrush.updateMatrixWorld()
+      if (localTextGeos.length > 0) {
+        const textMerged = mergeBufferGeometries(localTextGeos)
+        if (textMerged) {
+          const textBrush = new Brush(textMerged)
+          textBrush.updateMatrixWorld()
 
-            const baseBrush = new Brush(baseNonIdx)
-            baseBrush.applyMatrix4(mTray)
-            baseBrush.updateMatrixWorld()
+          const baseBrush = new Brush(baseNonIdx)
+          baseBrush.applyMatrix4(mTray)
+          baseBrush.updateMatrixWorld()
 
-            await yieldToMain()
-            const result = localEvaluator.evaluate(baseBrush, textBrush, textOp)
-            await yieldToMain()
+          await yieldToMain()
+          const result = localEvaluator.evaluate(baseBrush, textBrush, textOp)
+          await yieldToMain()
 
-            // Revert back to local origin so the instance matrix works seamlessly
-            const invTray = mTray.clone().invert()
-            result.geometry.applyMatrix4(invTray)
-            result.geometry.computeVertexNormals()
-            finalGeo = result.geometry
-          }
+          // Revert back to local origin so the instance matrix works seamlessly
+          const invTray = mTray.clone().invert()
+          result.geometry.applyMatrix4(invTray)
+          result.geometry.computeVertexNormals()
+          finalGeo = result.geometry
         }
       }
 

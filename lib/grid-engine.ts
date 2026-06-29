@@ -1,7 +1,7 @@
 // Phase 3: Coordinate mapping & honeycomb layout engine.
 // Maps logical pixel indices (x, y) to real-world mm coordinates on the XZ plane.
 
-import type { PuzzleConfig, TileShape, VoxelMatrix } from "./types"
+import type { PuzzleConfig, VoxelMatrix } from "./types"
 
 const SIN_60 = Math.sin(Math.PI / 3) // ≈ 0.8660254
 
@@ -17,7 +17,6 @@ export interface CellPlacement {
 }
 
 export interface GridLayout {
-  shape: TileShape
   /** Edge-to-edge pitch between cell centers (mm). */
   pitch: number
   /** Nominal tile footprint size (mm) before clearance. */
@@ -34,11 +33,6 @@ export interface GridLayout {
   placements: CellPlacement[]
 }
 
-/** Whether a shape nests in a hexagonal (honeycomb) grid. */
-export function isHoneycomb(shape: TileShape): boolean {
-  return shape === "hexagon"
-}
-
 /**
  * Build the spatial layout for the whole matrix.
  * - Cartesian (square / cylinder / heart): strict linear projection.
@@ -47,9 +41,6 @@ export function isHoneycomb(shape: TileShape): boolean {
 export function computeLayout(matrix: VoxelMatrix, config: PuzzleConfig): GridLayout {
   const width = matrix.width
   const height = matrix.height
-  const honeycomb = isHoneycomb(config.tileShape)
-
-  // Lock pitch to the master STL dimensions (8.75mm for both 16x16 and 24x24)
   const pitch = 8.75
   const tileSize = 7.8 // Master block STL size
   
@@ -61,7 +52,7 @@ export function computeLayout(matrix: VoxelMatrix, config: PuzzleConfig): GridLa
   const rowStep = pitch
   const colStep = pitch
 
-  const spanX = (width - 1) * colStep + (honeycomb ? pitch / 2 : 0)
+  const spanX = (width - 1) * colStep
   const spanZ = (height - 1) * rowStep
   
   // Because the resolution is strictly locked to multiples of the basePlateSize,
@@ -71,11 +62,10 @@ export function computeLayout(matrix: VoxelMatrix, config: PuzzleConfig): GridLa
 
   const placements: CellPlacement[] = []
   for (let gy = 0; gy < height; gy++) {
-    const rowShift = honeycomb && gy % 2 === 1 ? pitch / 2 : 0
     const worldZ = gy * rowStep - alignZ
     for (let gx = 0; gx < width; gx++) {
       const cell = matrix.cells[gx][gy]
-      const worldX = gx * colStep + rowShift - alignX
+      const worldX = gx * colStep - alignX
       placements.push({
         gx,
         gy,
@@ -92,7 +82,6 @@ export function computeLayout(matrix: VoxelMatrix, config: PuzzleConfig): GridLa
   const boardDepth = spanZ + pitch
 
   return {
-    shape: config.tileShape,
     pitch,
     tileSize,
     baseHeight,

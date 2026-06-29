@@ -1,8 +1,6 @@
 // Shared domain types for the Pixel Puzzle Maker engine.
 
-export type TileShape = "square" | "cylinder" | "hexagon" | "heart"
-
-export type EmbossingStyle = "none" | "raised" | "recessed"
+export type EmbossingStyle = "raised" | "recessed"
 
 export interface CropRatio {
   id: string
@@ -29,7 +27,7 @@ export type BasePlateSize = 16 | 24
 export type ScaleMultiplier = 1 | 2 | 3 | 4
 
 export const MIN_COLORS = 2
-export const MAX_COLORS = 6
+export const MAX_COLORS = 16
 
 /** A single quantized palette entry. */
 export interface PaletteColor {
@@ -81,7 +79,6 @@ export const PRINTER_BEDS: PrinterBed[] = [
   { id: "bambu-mini", name: "Bambu Lab A1 mini (180x180)", width: 180, depth: 180 },
   { id: "prusa-mk4", name: "Prusa MK4 (250x210)", width: 250, depth: 210 },
   { id: "ender-3", name: "Ender 3 (220x220)", width: 220, depth: 220 },
-  { id: "custom", name: "Custom", width: 200, depth: 200 },
 ]
 
 export interface PuzzleConfig {
@@ -89,13 +86,10 @@ export interface PuzzleConfig {
   resolutionMultiplier: ScaleMultiplier
   cropRatio: CropRatio
   colorCount: number
-  tileShape: TileShape
   embossing: EmbossingStyle
   bedId: string
   bedWidth: number
   bedDepth: number
-  /** Target physical board size in mm (longest edge). */
-  physicalSizeMm: number
 }
 
 export const DEFAULT_CONFIG: PuzzleConfig = {
@@ -103,12 +97,10 @@ export const DEFAULT_CONFIG: PuzzleConfig = {
   resolutionMultiplier: 1,
   cropRatio: CROP_RATIOS[0],
   colorCount: 4,
-  tileShape: "square",
   embossing: "raised",
   bedId: "bambu-a1",
   bedWidth: 256,
   bedDepth: 256,
-  physicalSizeMm: 120,
 }
 
 /** Worker request/response contracts. */

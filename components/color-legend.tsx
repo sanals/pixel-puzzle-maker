@@ -53,20 +53,13 @@ function ColorLegendRow({ c }: { readonly c: PaletteColor }) {
       }}
     >
       <td className="px-1.5 py-2">
-        <span
-          className="flex size-6 items-center justify-center rounded-md text-xs font-bold tabular-nums transition-colors"
-          style={{ backgroundColor: localHex, color: contrastText(...c.rgb) }}
-        >
-          {c.label}
-        </span>
-      </td>
-      <td className="px-1.5 py-2">
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-1.5">
           <div
-            className="relative size-5 overflow-hidden rounded-sm border border-border/60 transition-colors"
-            style={{ backgroundColor: localHex }}
+            className="relative flex size-6 items-center justify-center overflow-hidden rounded-md border border-border/60 transition-colors text-xs font-bold tabular-nums cursor-pointer"
+            style={{ backgroundColor: localHex, color: contrastText(...c.rgb) }}
             title="Click to edit color"
           >
+            {c.label}
             <input
               type="color"
               value={localHex}
@@ -75,7 +68,7 @@ function ColorLegendRow({ c }: { readonly c: PaletteColor }) {
               onClick={(e) => e.stopPropagation()}
             />
           </div>
-          <code className="text-xs text-muted-foreground">{localHex.toUpperCase()}</code>
+          <code className="text-[11px] text-muted-foreground tracking-tighter">{localHex.toUpperCase()}</code>
         </div>
       </td>
       <td className="px-1.5 py-2 text-right tabular-nums text-muted-foreground">
@@ -156,7 +149,6 @@ export function ColorLegend() {
         <table className="w-full text-sm">
           <thead>
             <tr className="border-b bg-muted/50 text-left text-[11px] uppercase tracking-wide text-muted-foreground">
-              <th className="px-1.5 py-2 font-medium">Key</th>
               <th className="px-1.5 py-2 font-medium">Color</th>
               <th className="px-1.5 py-2 text-right font-medium">Pixels</th>
               <th className="px-1.5 py-2 text-right font-medium">Cover</th>

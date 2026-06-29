@@ -6,7 +6,7 @@ import { TextGeometry } from "three-stdlib"
 import { Brush, Evaluator, SUBTRACTION, ADDITION } from "three-bvh-csg"
 import { STLLoader } from "three-stdlib"
 import type { GridLayout } from "./grid-engine"
-import type { EmbossingStyle, PaletteColor, TileShape } from "./types"
+import type { EmbossingStyle, PaletteColor } from "./types"
 
 let cachedFont: Font | null = null
 export async function getFont(): Promise<Font> {
@@ -67,52 +67,13 @@ const POCKET_EXPAND_MM = 0.05 // Expand pocket by 0.05mm radially
  * Build a flat 2D outline (THREE.Shape) for a tile/pocket footprint.
  * `r` is the half-extent (radius) of the footprint in mm.
  */
-export function buildShape(shape: TileShape, r: number, cx = 0, cy = 0): THREE.Shape {
+export function buildShape(r: number, cx = 0, cy = 0): THREE.Shape {
   const s = new THREE.Shape()
-  switch (shape) {
-    case "cylinder": {
-      s.absarc(cx, cy, r, 0, Math.PI * 2, false)
-      break
-    }
-    case "hexagon": {
-      // Flat-top hexagon nested for honeycomb packing.
-      for (let i = 0; i < 6; i++) {
-        const a = (Math.PI / 180) * (60 * i)
-        const x = cx + r * Math.cos(a)
-        const y = cy + r * Math.sin(a)
-        if (i === 0) s.moveTo(x, y)
-        else s.lineTo(x, y)
-      }
-      s.closePath()
-      break
-    }
-    case "heart": {
-      // Parametric heart curve scaled to fit within radius r.
-      const steps = 48
-      const scale = r / 17
-      for (let i = 0; i <= steps; i++) {
-        const t = (i / steps) * Math.PI * 2
-        const x = 16 * Math.pow(Math.sin(t), 3)
-        const y =
-          13 * Math.cos(t) - 5 * Math.cos(2 * t) - 2 * Math.cos(3 * t) - Math.cos(4 * t)
-        const px = cx + x * scale
-        const py = cy + y * scale
-        if (i === 0) s.moveTo(px, py)
-        else s.lineTo(px, py)
-      }
-      s.closePath()
-      break
-    }
-    case "square":
-    default: {
-      s.moveTo(cx - r, cy - r)
-      s.lineTo(cx + r, cy - r)
-      s.lineTo(cx + r, cy + r)
-      s.lineTo(cx - r, cy + r)
-      s.closePath()
-      break
-    }
-  }
+  s.moveTo(cx - r, cy - r)
+  s.lineTo(cx + r, cy - r)
+  s.lineTo(cx + r, cy + r)
+  s.lineTo(cx - r, cy + r)
+  s.closePath()
   return s
 }
 
@@ -127,16 +88,15 @@ function layFlat(geo: THREE.ExtrudeGeometry): THREE.BufferGeometry {
  * Returned geometry sits with its base at y=0 and rises to y=height.
  */
 export function createTileGeometry(
-  shape: TileShape,
   tileSize: number,
   height: number,
 ): THREE.BufferGeometry {
   const r = tileSize / 2 - TILE_SHRINK_MM
-  const path = buildShape(shape, Math.max(0.5, r))
+  const path = buildShape(Math.max(0.5, r))
   const geo = new THREE.ExtrudeGeometry(path, {
     depth: height,
     bevelEnabled: false,
-    curveSegments: shape === "cylinder" || shape === "heart" ? 24 : 6,
+    curveSegments: 6,
   })
   layFlat(geo)
   // After rotateX, extrude depth spans y in [-height, 0]; lift base to 0.
@@ -169,7 +129,7 @@ export function createTrayGeometry(
     const p = layout.placements[i]
     const lx = p.worldX - cx
     const lz = p.worldZ - cz
-    const hole = buildShape(layout.shape, holeRadius, lx, lz)
+    const hole = buildShape(holeRadius, lx, lz)
     outer.holes.push(hole)
   }
 
@@ -179,7 +139,7 @@ export function createTrayGeometry(
   const latticeGeo = new THREE.ExtrudeGeometry(outer, {
     depth: layout.pocketDepth,
     bevelEnabled: false,
-    curveSegments: layout.shape === "cylinder" || layout.shape === "heart" ? 24 : 6,
+    curveSegments: 6,
   })
   layFlat(latticeGeo)
   latticeGeo.translate(0, floorThickness + layout.pocketDepth, 0)
@@ -311,7 +271,7 @@ export async function buildPuzzleGroup(
 
   // --- Tiles: ONE single InstancedMesh for all 9000+ tiles ---
   const floorY = floorThickness
-  const tileGeo = assets ? assets.block : track(createTileGeometry(layout.shape, layout.tileSize, layout.tileHeight))
+  const tileGeo = assets ? assets.block : track(createTileGeometry(layout.tileSize, layout.tileHeight))
   
   const tileMat = track(
     new THREE.MeshStandardMaterial({
@@ -357,50 +317,48 @@ export async function buildPuzzleGroup(
   group.add(tileInst)
 
   // --- Letter decals (raised on tile face / recessed onto pocket floor) ---
-  if (embossing !== "none") {
-    const planeSize = layout.tileSize * 0.62
-    const raised = embossing === "raised"
-    const decalY = floorThickness + 0.01 // barely above the pocket floor
+  const planeSize = layout.tileSize * 0.62
+  const raised = embossing === "raised"
+  const decalY = floorThickness + 0.01 // barely above the pocket floor
+  
+  // Group indices by color for decals
+  const byColor = new Map<number, number[]>()
+  for (let i = 0; i < count; i++) {
+    const ci = layout.placements[i].colorIndex
+    if (!byColor.has(ci)) byColor.set(ci, [])
+    byColor.get(ci)!.push(i)
+  }
+  
+  // Share a single plane geometry for all decal instances
+  const planeGeo = track(new THREE.PlaneGeometry(planeSize, planeSize))
+  
+  for (const [colorIndex, indices] of byColor) {
+    const pal = palette[colorIndex]
+    if (pal.ignored) continue 
     
-    // Group indices by color for decals
-    const byColor = new Map<number, number[]>()
-    for (let i = 0; i < count; i++) {
-      const ci = layout.placements[i].colorIndex
-      if (!byColor.has(ci)) byColor.set(ci, [])
-      byColor.get(ci)!.push(i)
-    }
+    const lum = (0.2126 * pal.rgb[0] + 0.7152 * pal.rgb[1] + 0.0722 * pal.rgb[2]) / 255
+    const ink = raised ? (lum > 0.45 ? "#0b1020" : "#f8fafc") : "#0b1020"
+    const tex = track(createLabelTexture(pal.label, ink))
     
-    // Share a single plane geometry for all decal instances
-    const planeGeo = track(new THREE.PlaneGeometry(planeSize, planeSize))
-    
-    for (const [colorIndex, indices] of byColor) {
-      const pal = palette[colorIndex]
-      if (pal.ignored) continue 
-      
-      const lum = (0.2126 * pal.rgb[0] + 0.7152 * pal.rgb[1] + 0.0722 * pal.rgb[2]) / 255
-      const ink = raised ? (lum > 0.45 ? "#0b1020" : "#f8fafc") : "#0b1020"
-      const tex = track(createLabelTexture(pal.label, ink))
-      
-      const planeMat = track(
-        new THREE.MeshStandardMaterial({
-          map: tex,
-          transparent: true,
-          roughness: 0.6,
-          depthWrite: false,
-        }),
-      )
-      const decals = track(new THREE.InstancedMesh(planeGeo, planeMat, indices.length))
-      indices.forEach((idx, j) => {
-        const p = layout.placements[idx]
-        const mat4 = new THREE.Matrix4()
-        const rot = new THREE.Matrix4().makeRotationX(-Math.PI / 2)
-        const trans = new THREE.Matrix4().makeTranslation(p.worldX, decalY, p.worldZ)
-        mat4.multiplyMatrices(trans, rot)
-        decals.setMatrixAt(j, mat4)
-      })
-      decals.instanceMatrix.needsUpdate = true
-      group.add(decals)
-    }
+    const planeMat = track(
+      new THREE.MeshStandardMaterial({
+        map: tex,
+        transparent: true,
+        roughness: 0.6,
+        depthWrite: false,
+      }),
+    )
+    const decals = track(new THREE.InstancedMesh(planeGeo, planeMat, indices.length))
+    indices.forEach((idx, j) => {
+      const p = layout.placements[idx]
+      const mat4 = new THREE.Matrix4()
+      const rot = new THREE.Matrix4().makeRotationX(-Math.PI / 2)
+      const trans = new THREE.Matrix4().makeTranslation(p.worldX, decalY, p.worldZ)
+      mat4.multiplyMatrices(trans, rot)
+      decals.setMatrixAt(j, mat4)
+    })
+    decals.instanceMatrix.needsUpdate = true
+    group.add(decals)
   }
 
   // Center the whole group vertically already handled (base at +y).
