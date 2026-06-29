@@ -1,13 +1,12 @@
 "use client"
 
-import { useEffect, useRef, useState } from "react"
+import { useEffect, useRef } from "react"
 import * as THREE from "three"
 import { OrbitControls } from "three/addons/controls/OrbitControls.js"
 import { buildPuzzleGroup } from "@/lib/geometry-generators"
 import type { GridLayout } from "@/lib/grid-engine"
 import type { EmbossingStyle, PaletteColor } from "@/lib/types"
 import { usePuzzle } from "@/components/puzzle-context"
-import { Paintbrush } from "lucide-react"
 
 interface Preview3DProps {
   layout: GridLayout
@@ -17,7 +16,7 @@ interface Preview3DProps {
 
 export function Preview3D({ layout, palette, embossing }: Preview3DProps) {
   const mountRef = useRef<HTMLDivElement | null>(null)
-  const { paintMode, setPaintMode, activeColorIndex, paintCell } = usePuzzle()
+  const { paintMode, activeColorIndex, paintCell } = usePuzzle()
 
   const stateRef = useRef({ paintMode, activeColorIndex, paintCell })
   useEffect(() => {
@@ -97,13 +96,13 @@ export function Preview3D({ layout, palette, embossing }: Preview3DProps) {
         })
       }
     }
-    
+
     // This allows OrbitControls damping to naturally keep requesting frames until momentum reaches 0
     controls.addEventListener('change', requestRender)
-    
+
     // Store requestRender on the scene so we can manually trigger it from the second useEffect
     scene.userData.requestRender = requestRender
-    
+
     requestRender()
 
     const handleResize = () => {
@@ -118,34 +117,34 @@ export function Preview3D({ layout, palette, embossing }: Preview3DProps) {
     }
     const ro = new ResizeObserver(handleResize)
     ro.observe(mount)
-    
+
     // Raycasting for paint mode
     const raycaster = new THREE.Raycaster()
     const mouse = new THREE.Vector2()
-    
+
     const onPointerDown = (event: PointerEvent) => {
       if (!stateRef.current.paintMode || !groupRef.current || !cameraRef.current || event.button !== 0) return
-      
+
       const rect = renderer.domElement.getBoundingClientRect()
       mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1
       mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1
-      
+
       raycaster.setFromCamera(mouse, cameraRef.current)
-      
+
       const intersects = raycaster.intersectObject(groupRef.current, true)
-      
+
       for (const intersect of intersects) {
         if (intersect.object instanceof THREE.InstancedMesh && intersect.instanceId !== undefined) {
-           const placements = intersect.object.userData.placements
-           if (placements && placements[intersect.instanceId]) {
-             const p = placements[intersect.instanceId]
-             stateRef.current.paintCell(p.gx, p.gy, stateRef.current.activeColorIndex)
-             break
-           }
+          const placements = intersect.object.userData.placements
+          if (placements && placements[intersect.instanceId]) {
+            const p = placements[intersect.instanceId]
+            stateRef.current.paintCell(p.gx, p.gy, stateRef.current.activeColorIndex)
+            break
+          }
         }
       }
     }
-    
+
     renderer.domElement.addEventListener('pointerdown', onPointerDown)
 
     return () => {
@@ -189,34 +188,34 @@ export function Preview3D({ layout, palette, embossing }: Preview3DProps) {
     if (!scene || !camera || !controls) return
 
     const span = Math.max(layout.boardWidth, layout.boardDepth)
-    
+
     // Only reset camera and lights if the physical size of the board changes
     if (lastSpanRef.current !== span) {
       lastSpanRef.current = span
-      
+
       // Temporarily disable damping to force a hard teleport without residual momentum
       controls.enableDamping = false
       camera.position.set(span * 0.75, span * 0.85, span * 0.95)
       controls.target.set(0, layout.baseHeight, 0)
       camera.lookAt(0, layout.baseHeight, 0)
-      controls.update() 
+      controls.update()
       controls.enableDamping = true
-      
+
       if (scene.userData.keyLight) {
-         const key = scene.userData.keyLight as THREE.DirectionalLight
-         key.position.set(span * 0.6, span * 1.2, span * 0.4)
-         const d = span * 0.9
-         key.shadow.camera.left = -d
-         key.shadow.camera.right = d
-         key.shadow.camera.top = d
-         key.shadow.camera.bottom = -d
-         key.shadow.camera.far = span * 4
-         key.shadow.camera.updateProjectionMatrix()
+        const key = scene.userData.keyLight as THREE.DirectionalLight
+        key.position.set(span * 0.6, span * 1.2, span * 0.4)
+        const d = span * 0.9
+        key.shadow.camera.left = -d
+        key.shadow.camera.right = d
+        key.shadow.camera.top = d
+        key.shadow.camera.bottom = -d
+        key.shadow.camera.far = span * 4
+        key.shadow.camera.updateProjectionMatrix()
       }
-      
+
       if (scene.userData.fillLight) {
-         const fill = scene.userData.fillLight as THREE.DirectionalLight
-         fill.position.set(-span * 0.5, span * 0.4, -span * 0.6)
+        const fill = scene.userData.fillLight as THREE.DirectionalLight
+        fill.position.set(-span * 0.5, span * 0.4, -span * 0.6)
       }
     }
 
@@ -228,16 +227,16 @@ export function Preview3D({ layout, palette, embossing }: Preview3DProps) {
         dispose()
         return
       }
-      
+
       // Remove old group if it exists
       if (groupRef.current) {
-         scene.remove(groupRef.current)
+        scene.remove(groupRef.current)
       }
-      
+
       currentDispose = dispose
       groupRef.current = group
       scene.add(group)
-      
+
       // Trigger a render frame now that the scene has updated
       if (scene.userData.requestRender) {
         scene.userData.requestRender()
@@ -248,8 +247,8 @@ export function Preview3D({ layout, palette, embossing }: Preview3DProps) {
       mounted = false
       if (currentDispose) currentDispose()
       if (groupRef.current && scene) {
-         scene.remove(groupRef.current)
-         groupRef.current = null
+        scene.remove(groupRef.current)
+        groupRef.current = null
       }
     }
   }, [layout, palette, embossing])
@@ -257,7 +256,7 @@ export function Preview3D({ layout, palette, embossing }: Preview3DProps) {
   return (
     <div className="relative h-full w-full">
       <div ref={mountRef} className="absolute inset-0" aria-label="Interactive 3D preview" />
-      
+
       {paintMode && (
         <div className="pointer-events-none absolute bottom-4 left-0 right-0 flex justify-center z-10">
           <div className="rounded-full bg-background/80 px-4 py-2 text-sm font-medium shadow-md backdrop-blur-sm border">

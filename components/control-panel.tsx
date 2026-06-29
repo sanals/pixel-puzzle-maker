@@ -8,15 +8,7 @@ import { usePuzzle } from "@/components/puzzle-context"
 import { UploadZone } from "@/components/upload-zone"
 import { Label } from "@/components/ui/label"
 import { Separator } from "@/components/ui/separator"
-import { Slider } from "@/components/ui/slider"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { MAX_COLORS, MIN_COLORS, BasePlateSize } from "@/lib/types"
 
@@ -28,7 +20,7 @@ export function ControlPanel() {
     const handleKeyDown = (e: KeyboardEvent) => {
       // Don't trigger if the user is typing in an input
       if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return
-      
+
       if (e.ctrlKey || e.metaKey) {
         if (e.key === 'z' || e.key === 'Z') {
           if (e.shiftKey) {
@@ -83,17 +75,17 @@ export function ControlPanel() {
                 <Grid2x2 className="size-4 text-primary" aria-hidden="true" />
                 Physical Base Plate
               </Label>
-              <ToggleGroup 
-                size="sm" 
-                value={[config.basePlateSize.toString()]} 
+              <ToggleGroup
+                size="sm"
+                value={[config.basePlateSize.toString()]}
                 onValueChange={(val: string[]) => {
                   if (val && val.length > 0) updateConfig({ basePlateSize: parseInt(val[0]) as BasePlateSize, resolutionMultiplier: Math.min(config.resolutionMultiplier, maxMultiplier) as any })
                 }}
                 className="border rounded-md p-0.5"
               >
                 <ToggleGroupItem value="16" className="h-7 px-3 text-xs aria-pressed:bg-indigo-600 aria-pressed:text-white hover:aria-pressed:bg-indigo-600 hover:aria-pressed:text-white">16x16</ToggleGroupItem>
-                <ToggleGroupItem 
-                  value="24" 
+                <ToggleGroupItem
+                  value="24"
                   disabled={config.bedId === "bambu-mini"}
                   className="h-7 px-3 text-xs aria-pressed:bg-indigo-600 aria-pressed:text-white hover:aria-pressed:bg-indigo-600 hover:aria-pressed:text-white disabled:opacity-30 disabled:cursor-not-allowed"
                   title={config.bedId === "bambu-mini" ? "24x24 is too large for A1 Mini plates" : ""}
@@ -107,11 +99,10 @@ export function ControlPanel() {
               <Label className="flex items-center gap-2 text-sm font-medium text-muted-foreground mb-1">
                 Resolution (Blocks)
               </Label>
-              <ToggleGroup 
-                type="single"
-                value={Math.min(config.resolutionMultiplier, maxMultiplier).toString()}
-                onValueChange={(val: string) => {
-                  if (val) updateConfig({ resolutionMultiplier: parseInt(val) as any })
+              <ToggleGroup
+                value={[Math.min(config.resolutionMultiplier, maxMultiplier).toString()]}
+                onValueChange={(val: string[]) => {
+                  if (val && val.length > 0) updateConfig({ resolutionMultiplier: parseInt(val[0]) as any })
                 }}
                 disabled={disabled || maxMultiplier === 1}
                 className="grid grid-cols-3 gap-1.5 w-full"
@@ -121,9 +112,9 @@ export function ControlPanel() {
                   const w = m * config.basePlateSize * config.cropRatio.w
                   const h = m * config.basePlateSize * config.cropRatio.h
                   return (
-                    <ToggleGroupItem 
-                      key={m} 
-                      value={m.toString()} 
+                    <ToggleGroupItem
+                      key={m}
+                      value={m.toString()}
                       className="h-9 px-2 text-xs font-medium border border-input bg-background aria-pressed:bg-indigo-600 aria-pressed:text-white hover:bg-accent aria-pressed:border-indigo-600 hover:aria-pressed:bg-indigo-600 hover:aria-pressed:text-white transition-colors"
                     >
                       {w} × {h}
@@ -190,11 +181,10 @@ export function ControlPanel() {
               <button
                 onClick={() => setPaintMode(!paintMode)}
                 disabled={disabled}
-                className={`flex items-center gap-1.5 rounded-md border px-2.5 py-1 text-xs font-medium transition-colors ${
-                  paintMode
-                    ? "bg-primary text-primary-foreground border-primary"
-                    : "bg-background hover:bg-muted text-muted-foreground hover:text-foreground disabled:opacity-50"
-                }`}
+                className={`flex items-center gap-1.5 rounded-md border px-2.5 py-1 text-xs font-medium transition-colors ${paintMode
+                  ? "bg-primary text-primary-foreground border-primary"
+                  : "bg-background hover:bg-muted text-muted-foreground hover:text-foreground disabled:opacity-50"
+                  }`}
               >
                 <Paintbrush className="h-3.5 w-3.5" />
                 {paintMode ? "Painting" : "Paint"}
