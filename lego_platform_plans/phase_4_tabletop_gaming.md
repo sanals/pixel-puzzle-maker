@@ -8,6 +8,7 @@ Target the massive tabletop gaming community (D&D, Warhammer, Board Games). We w
 ### 1. The Hex Terrain Matrix (Settlers / Battletech)
 - **Concept:** Standard board game hexes (like Settlers of Catan) are not compatible with square LEGO plates.
 - **Generator:** A tool where users define the radius of a hexagon. The engine generates a perfect hex base. It calculates a bounding box, masks a standard 8mm pitch stud array using the hex path (via CSG intersection), and drops perfect studs onto the hex.
+- **Performance Budget:** Large hex maps doing CSG intersection per-stud can be slow. The generator must adhere to the performance budget established in Phase 0 (e.g., maintaining 60fps or baking within X seconds).
 - **Result:** Players can snap standard LEGO trees, houses, and minifigures onto their custom 3D printed hex boards.
 
 ### 2. D&D Modular Dungeon System
@@ -16,7 +17,7 @@ Target the massive tabletop gaming community (D&D, Warhammer, Board Games). We w
   - Standardized straight and corner wall segments.
   - The bottom features no studs, just flat plates.
   - The *Sides* of the base feature standard Technic pin holes. 
-  - We generate simple friction pins (or users can use real LEGO Technic pins) to snap rooms and corridors together horizontally.
+  - We generate simple printed friction pins to snap rooms and corridors together horizontally. These printed pins must use the **`pressFit`** or **`slidingFit`** tolerance class (from Phase 0) to ensure they are functional, unlike static studs. Alternatively, users can opt to use real LEGO Technic pins.
 
 ### 3. Modular Dice Towers
 - **Concept:** Dice towers are fun, but usually static. A LEGO-compatible dice tower lets users theme it differently for every campaign (Sci-Fi one night, Castle the next).
@@ -29,11 +30,12 @@ Target the massive tabletop gaming community (D&D, Warhammer, Board Games). We w
 - **Concept:** Warhammer and D&D miniatures have standard bases (25mm, 32mm rounds).
 - **Implementation:** 
   - Generate round bases with a single central LEGO stud to mount custom builds, or a ring of studs around the edge.
-  - Generate 2-part snapping concentric dials (like HeroClix) with numbers to track Health/Mana, using a central Technic axle pin for rotation.
+  - Generate 2-part snapping concentric dials (like HeroClix) with numbers to track Health/Mana, using a central Technic axle pin for rotation. The central axle and ring mechanism explicitly requires the **`slidingFit`** tolerance class from Phase 0 to rotate freely without binding.
 
 ## Open Source Repos to Leverage
 - **`LasseD/buildinginstructions.js`:** Reference for step-by-step 3D instructions.
 
 ## Agent Execution Instructions for Phase 4
 When executing this phase, the AI agent must:
-1. **Clone `LasseD/buildinginstructions.js`:** Clone the repo and analyze the source code to understand how it parses LDraw formats and steps through the geometries to render interactive assembly instructions. We will need to adapt this logic for our tabletop generated geometries.
+1. **LDraw Format Conversion:** `buildinginstructions.js` requires the `LDraw` format, whereas our pipeline generates Three.js BufferGeometry/InstancedMesh. As a prerequisite task, you must build or integrate a converter pipeline (Native Geometry -> LDraw) to feed the instruction generator.
+2. **Clone `LasseD/buildinginstructions.js`:** Clone the repo and analyze the source code to understand how it parses LDraw formats and steps through the geometries to render interactive assembly instructions. Adapt this logic for our tabletop generated geometries.

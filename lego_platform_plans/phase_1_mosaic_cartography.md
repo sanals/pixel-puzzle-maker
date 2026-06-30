@@ -8,23 +8,24 @@ Adapt the 2D pixel processing architecture from `pixel-puzzle-maker_2` and combi
 ### 1. The Pro Pixel Art & Portrait Engine
 - **Concept:** Translates user uploaded images (JPEGs/PNGs) into 2D studded LEGO baseplates.
 - **Enhancements over previous puzzle maker:**
-  - **BrickLink Color Mapping:** Instead of arbitrary palettes, we constrain quantization to real-world LEGO filament/brick colors (e.g., standard red, dark bluish grey).
+  - **Image Downsampling:** Expose the downsampling algorithm (e.g., nearest-neighbor vs. area averaging) as a user option to control how a 4K image reduces to a 96x96 stud mosaic.
+  - **BrickLink Color Mapping:** Use a manually curated palette inspired by real-world LEGO filament/brick colors to avoid trademark/API issues while ensuring users can buy matching real-world parts.
   - **Stud Omission (Background Removal):** If a user hides a color in the palette, the engine skips generating those 1x1 plates, leaving the raw baseplate exposed. This mimics official LEGO Art sets and saves massive amounts of filament.
-  - **Mini-Map Engraving:** For massive posters (e.g., 96x96 studs), the engine slices the model into multiple 16x16 plates and automatically engraves coordinates (A1, A2, B1) onto the back using CSG subtraction.
+  - **Bill of Materials (BOM):** Generate an exact piece count list for the user, summarizing how many 1x1 plates of each color are needed.
+  - **Mini-Map Engraving:** For massive posters (e.g., 96x96 studs), the engine slices the model into multiple 16x16 plates and automatically engraves coordinates (A1, A2, B1) onto the back using a robust **text-to-geometry pipeline** (font loading -> 2D extrusion -> CSG subtraction).
 
 ### 2. Topographic & Bathymetric Map Modeler
-- **Concept:** Generate stunning 3D stepped landscapes using real-world map data.
+- **Concept:** Generate stunning 3D stepped landscapes using real-world map data. *Note: This has a hard dependency on Phase 0's non-uniform instancing model to support variable heights per column.*
 - **Integration:** 
   - Allow users to upload grayscale DEM (Digital Elevation Model) or Bathymetric (ocean depth) images.
-  - White pixels represent the highest elevation, black pixels the lowest.
-- **Parametric Generation:**
-  - The script samples the image grid. Instead of color mapping, it maps brightness to *Height*.
-  - *Math:* A baseplate is generated. If a pixel is 50% gray, it generates a stack of 5 plates (3.2mm each = 16mm height) at that stud coordinate.
+- **Parametric Generation & Scaling:**
+  - The script samples the image grid. Instead of color mapping, it maps 8-bit brightness (0-255) to *Height*.
+  - *Quantization Logic:* Users define a "Max Height" (e.g., 20 plates). The 0-255 brightness range is linearly scaled and quantized to discrete plate heights (3.2mm increments).
   - Generates a breathtaking 3D physical map that looks incredibly premium when side-lit.
 
 ### 3. Soundwave & Lithophane Generators
 - **Soundwaves:** Upload an MP3/WAV. The browser uses the Web Audio API to extract a frequency array, normalizing it to a 32x32 stud grid to generate a 3D physical equalizer wave out of standard LEGO bricks.
-- **Lithophanes:** Combine thin, translucent standard LEGO backing walls (0.8mm - 2mm thick) with a structural studded frame, allowing users to build lightboxes directly into their LEGO castles or houses.
+- **Lithophanes:** Generate a true, variable-depth surface where local wall thickness varies per-pixel to encode image brightness. This is combined with a structural studded frame, allowing users to build lightboxes directly into their LEGO castles or houses.
 
 ## Open Source Repos to Leverage
 - **`ethantr/lego-mosaic`:** A TypeScript reference for the Pro Pixel Art Engine.
