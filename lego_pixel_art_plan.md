@@ -46,7 +46,15 @@ Instead of loading external STLs, we will write a `lego-geometry.ts` module that
 - Because we are generating the geometry mathematically in Three.js, we can simply pass the `.geometry` of our generated LEGO pieces directly into the exporter.
 - Multi-plate slicing works exactly the same: if the LEGO mosaic is `64x64`, we split it into four `32x32` base plates.
 
+### Phase 4: Integrating Advanced Editor Features
+Recent advancements in the `pixel-puzzle-maker_2` project directly benefit the LEGO implementation:
+- **SVG Extrusion Tool:** We recently proved out dynamic 3D generation using `THREE.Shape` and `ExtrudeGeometry`. While LEGO bricks use standard primitives (Box/Cylinder), this extrusion capability could allow users to generate custom stud tops (e.g., custom logos or symbols on the 1x1 plates).
+- **Manual Recolor (Paint Tool):** The 3D raycasting paint tool translates perfectly. Users can click individual 1x1 studs on the baseplate to manually fix weirdly colored pixels or add manual flourishes.
+- **Custom Hex Codes & Palettes:** Users can manually edit palette hex codes. For LEGO, we can optionally map this to a predefined "BrickLink Color Palette" for users buying real LEGO bricks, or let them input exact 3D printer filament hex codes.
+- **Background Removal:** Toggling a color's visibility in the legend will simply omit generating those 1x1 plates. This leaves the bare baseplate exposed (a very popular aesthetic in real LEGO mosaics) and saves massive amounts of filament/time.
+- **Mini-Map Engraving:** The CSG subtraction feature (prototyped for board grid coordinates like `A1, B1`) can be applied to the bottom of the LEGO baseplates, ensuring foolproof multi-plate assembly.
+
 ## 5. Conclusion
-Creating a LEGO-compatible clone is a fantastic idea and highly feasible. It will require writing some parametric 3D math using Three.js, but it eliminates the dependency on external STL files and provides users with a highly sought-after 3D printing use case (LEGO mosaics are incredibly popular).
+Creating a LEGO-compatible clone is a fantastic idea and highly feasible. By reusing our optimized 3MF instancing engine, the manual painting tools, and the advanced color palette systems, 80% of the work is already done. It will only require writing the parametric 3D math in Three.js, eliminating the dependency on external STL files and providing a highly sought-after 3D printing use case.
 
 Let me know if you want to initialize a new project for this, or if you want to start drafting the Three.js parametric LEGO generator!
