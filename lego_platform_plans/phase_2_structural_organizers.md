@@ -15,7 +15,7 @@ Tap into the massively popular 3D printing niche of "Home Organization" (Section
 - **Concept:** Need a wall mount for an iPad, a TV remote, or a digital caliper? 
 - **Implementation:**
   - **Inputs:** User inputs the exact X, Y, and Z dimensions of their object (e.g., `150mm x 70mm x 10mm`). They can add an optional "Lip" to secure the object.
-  - **CSG Operations:** The script takes a solid block, uses Constructive Solid Geometry (CSG) to subtract a perfectly sized hollow cavity for the device.
+  - **CSG Operations:** The script takes a solid block, uses Constructive Solid Geometry (CSG) to subtract a cavity for the device. The cavity will automatically apply the **`clearanceFit`** tolerance allowance to the user's dimensions so the physical device can actually slide in without an interference fit.
   - **Integration:** It then maps a 2D array of LEGO studs onto the entire exterior of the block.
   - **Result:** A custom device holder that snaps onto any LEGO wall or desk base.
 
@@ -25,7 +25,7 @@ Tap into the massively popular 3D printing niche of "Home Organization" (Section
   - Standard LEGO bricks are hollow and weak. Our generator will add heavy internal cross-bracing (like infill) and counter-sunk screw holes matching standard drywall anchors.
   - **Anchor Specification:** Drywall anchor sizes vary widely (#6, #8, #10). The UI will make the anchor screw hole diameter a parametric input so users can match their specific hardware.
   - The outer shell maintains perfect stud geometry to act as a display shelf for hundreds of minifigures or models.
-- **Safety / Load Rating:** Since these parts hold physical weight, the generator UI will include a load-rating disclaimer and ideally output an estimated safe load (in kg) based on the user's chosen infill and bracing parameters.
+- **Safety / Load Rating:** Since these parts hold physical weight, the generator UI will include a load-rating disclaimer. Crucially, the estimated safe load (in kg) will be calculated using a stated, conservative heuristic (e.g., a simplified beam formula factored by the user's chosen infill percentage, wall thickness, and the specific **`materialProfile`**'s tensile strength like PLA vs PETG) rather than an arbitrary guess, and the formula's source will be documented in the UI.
 
 ### 4. Custom Typography Signage
 - **Concept:** Instead of trying to build letters out of small square bricks, users can type their name, and we generate a solid custom word block.

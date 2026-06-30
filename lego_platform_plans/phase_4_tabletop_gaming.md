@@ -22,7 +22,7 @@ Target the massive tabletop gaming community (D&D, Warhammer, Board Games). We w
 ### 3. Modular Dice Towers
 - **Concept:** Dice towers are fun, but usually static. A LEGO-compatible dice tower lets users theme it differently for every campaign (Sci-Fi one night, Castle the next).
 - **Implementation:** 
-  - The generator builds a core structural chassis featuring internal angled ramps (baffles).
+  - The generator builds a core structural chassis featuring internal angled ramps (baffles). Note: *Baffle angles and clearances are functional mechanical designs and will require physical prototyping, as there is no CI check that guarantees dice won't jam.*
   - The four exterior walls of the chassis are covered entirely in a grid of standard LEGO studs.
   - Users print the core, then click flat tiles, bricks, and minifigures onto the walls to decorate it.
 
@@ -37,5 +37,5 @@ Target the massive tabletop gaming community (D&D, Warhammer, Board Games). We w
 
 ## Agent Execution Instructions for Phase 4
 When executing this phase, the AI agent must:
-1. **LDraw Format Conversion:** `buildinginstructions.js` requires the `LDraw` format, whereas our pipeline generates Three.js BufferGeometry/InstancedMesh. As a prerequisite task, you must build or integrate a converter pipeline (Native Geometry -> LDraw) to feed the instruction generator.
+1. **LDraw Format Conversion & Color Mapping:** `buildinginstructions.js` requires the `LDraw` format, whereas our pipeline generates Three.js BufferGeometry/InstancedMesh. As a prerequisite task, you must build or integrate a converter pipeline (Native Geometry -> LDraw) to feed the instruction generator. If parts are multi-colored, you must map our custom BrickLink-inspired palette back to LDraw's canonical numeric color-codes.
 2. **Clone `LasseD/buildinginstructions.js`:** Clone the repo and analyze the source code to understand how it parses LDraw formats and steps through the geometries to render interactive assembly instructions. Adapt this logic for our tabletop generated geometries.

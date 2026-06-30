@@ -12,7 +12,7 @@ Adapt the 2D pixel processing architecture from `pixel-puzzle-maker_2` and combi
   - **BrickLink Color Mapping:** Use a manually curated palette inspired by real-world LEGO filament/brick colors to avoid trademark/API issues while ensuring users can buy matching real-world parts.
   - **Stud Omission (Background Removal):** If a user hides a color in the palette, the engine skips generating those 1x1 plates, leaving the raw baseplate exposed. This mimics official LEGO Art sets and saves massive amounts of filament.
   - **Bill of Materials (BOM):** Generate an exact piece count list for the user, summarizing how many 1x1 plates of each color are needed.
-  - **Mini-Map Engraving:** For massive posters (e.g., 96x96 studs), the engine slices the model into multiple 16x16 plates and automatically engraves coordinates (A1, A2, B1) onto the back using a robust **text-to-geometry pipeline** (font loading -> 2D extrusion -> CSG subtraction).
+  - **Mini-Map Engraving & Registration:** For massive posters (e.g., 96x96 studs), the engine slices the model into multiple 16x16 plates. It automatically engraves coordinates (A1, A2, B1) onto the back using a robust **text-to-geometry pipeline** (font loading -> 2D extrusion -> CSG subtraction). Additionally, the slicing algorithm will generate interlocking keyed edges (e.g., dovetails) or Technic pin holes on the plate borders utilizing the **`pressFit`** tolerance class to ensure adjacent plates snap together perfectly during physical assembly.
 
 ### 2. Topographic & Bathymetric Map Modeler
 - **Concept:** Generate stunning 3D stepped landscapes using real-world map data. *Note: This has a hard dependency on Phase 0's non-uniform instancing model to support variable heights per column.*
@@ -24,8 +24,10 @@ Adapt the 2D pixel processing architecture from `pixel-puzzle-maker_2` and combi
   - Generates a breathtaking 3D physical map that looks incredibly premium when side-lit.
 
 ### 3. Soundwave & Lithophane Generators
-- **Soundwaves:** Upload an MP3/WAV. The browser uses the Web Audio API to extract a frequency array, normalizing it to a 32x32 stud grid to generate a 3D physical equalizer wave out of standard LEGO bricks.
-- **Lithophanes:** Generate a true, variable-depth surface where local wall thickness varies per-pixel to encode image brightness. This is combined with a structural studded frame, allowing users to build lightboxes directly into their LEGO castles or houses.
+- **Soundwaves:** Upload an MP3/WAV. The browser uses the Web Audio API to extract a frequency array, normalizing it to a 32x32 stud spectrogram grid (32 frequency bins × 32 time windows) to generate a 3D physical equalizer wave out of standard LEGO bricks.
+- **Lithophanes:** Generate a true, variable-depth surface where local wall thickness varies per-pixel to encode image brightness.
+  - **Architecture Note:** Unlike the discrete instances used for topography, this generator must utilize a *continuous deformed mesh* (vertex-displaced heightfield geometry) strategy. It will act as a third distinct geometry pipeline alongside CSG and Instancing.
+  - **Material & Attachment:** The UI must enforce or warn the user if a translucent material profile is not selected, as lithophanes require light to pass through. To avoid slow and failure-prone boolean unions on high-vertex-count deformed meshes, the lithophane surface and the structural studded frame will be generated as **mechanically adjacent** parts (printed separately and friction-fit together) rather than a single unified CSG mesh.
 
 ## Open Source Repos to Leverage
 - **`ethantr/lego-mosaic`:** A TypeScript reference for the Pro Pixel Art Engine.

@@ -11,8 +11,10 @@ Establish a clean, scalable, and modular foundation for the Parametric LEGO Plat
 - **Geometry Operations:** 
   - Use `three-bvh-csg` for fast native boolean operations (adding studs, subtracting holes). It is faster and better maintained for real-time use.
 - **Exporting:** `jszip` and our proven `generic-3mf-exporter.ts` to compress massive arrays of studs into lightweight 3MF files.
-- **State Management & Persistence:** Design `zustand` stores with local storage persistence (`.json` project saves) and built-in undo/redo capability from the start.
+- **State Management & Persistence:** Design `zustand` stores with robust persistence. Use `IndexedDB` (not just `localStorage`) to handle large `.json` project saves that include heavy binary assets. Undo/redo must track parameter diffs only; large binary assets (like images) are referenced by ID, not duplicated across history states.
+  - **Global Print Parameters & Overrides:** The state must include `infillPercentage`, `shellCount`, and a `materialProfile` (e.g., PLA Rigid, TPU Flexible, Translucent). Crucially, the platform will support **per-generator overrides** for these parameters (e.g., a structural bracket can request 40% infill while the global setting is 15%).
 - **Units:** The canonical internal unit is `mm`. A standard stud pitch is defined as exactly `8.0mm`. (Stud diameter `4.8mm` sourced from official LEGO tolerances). All generators must conform to this internal scale.
+- **Performance Budget & Degradation:** The core engine must maintain interactive 60fps viewports for up to 10,000 visible studs, and complete CSG geometry baking for a flat 48x48 plate in under 3 seconds. For complex CSG ops (hex intersections, topographic stacks), explicitly allocate higher bake-time budgets. If the geometry exceeds 10,000 studs, the UI must gracefully fallback to a degradation strategy (e.g., chunked rendering, LODs, or a dimension cap warning).
 
 ## Deliverables for Phase 0
 
@@ -21,8 +23,8 @@ Establish a clean, scalable, and modular foundation for the Parametric LEGO Plat
 - Implement standard R3F controls: `OrbitControls`, `GridHelper`, and lighting (`AmbientLight`, `DirectionalLight` with shadows).
 
 ### 2. The Typed "Printer Tolerance" System
-- **Concept:** Every FDM printer extrudes slightly differently. LEGO requires micrometer precision to snap fit. Instead of a single global scalar, the tolerance system must be strongly typed (e.g., `snapFit`, `slidingFit`, `pressFit`).
-- **Implementation:** A global state slider for `snapFit` (e.g., `-0.2mm` to `+0.2mm`) that propagates to geometry generators.
+- **Concept:** Every FDM printer extrudes slightly differently. LEGO requires micrometer precision to snap fit. Instead of a single global scalar, the tolerance system must be strongly typed (e.g., `snapFit`, `slidingFit`, `pressFit`, `clearanceFit`).
+- **Calibration Model:** The UI provides a primary calibration slider for `snapFit` (e.g., `-0.2mm` to `+0.2mm`). The other three tolerance types are derived from this base value via fixed engineering deltas, but the UI allows users to unlock and independently override them if needed.
 - *Math & Verification:* Standard LEGO stud diameter is `4.8mm`. We compensate for over-extrusion by shrinking studs and expanding holes. The sign convention must be explicitly verified with a real print test before baking it into the generators.
 
 ### 3. Native Three.js Primitive Engine (The Baseplate)
@@ -32,8 +34,11 @@ Establish a clean, scalable, and modular foundation for the Parametric LEGO Plat
 - **Features:** Sliders for `Width (studs)` and `Length (studs)`. Generates the precise 3D mesh instantly using this non-uniform instancing model for rendering and merging for export.
 
 ### 4. 3MF Export Integration & Geometry Validation
-- **Export Pipeline:** Hook up the `generic-3mf-exporter.ts` from `pixel-puzzle-maker_2`. Verify and adapt the exporter explicitly so it supports the new "bake instances to merged `BufferGeometry`" data structure.
-- **Validation Script:** Create a testing script that loads the exported geometry and mathematically asserts the final dimensions (stud diameter, tube diameter, height) against expected values. This ensures tolerance math is caught in CI, not at the 3D printer.
+- **Multi-Color & Export Pipeline:** Hook up the `generic-3mf-exporter.ts` from `pixel-puzzle-maker_2`. Verify and adapt the exporter so it supports the non-uniform instancing data structure, including passing through `materialProfile` metadata. For multi-color generators (like Phase 1 Mosaics), the exporter must offer two pipelines:
+  1. A single 3MF file with embedded per-instance color assignments (for users with AMS/MMU printers).
+  2. A `.zip` archive containing separate geometry files grouped by color (for single-extruder users to print batches manually).
+- **Validation Script:** Create a testing script that loads the exported geometry and mathematically asserts the final dimensions (stud diameter, tube diameter, height) against expected values. Furthermore, check the topology to ensure the exported mesh is **watertight/manifold**, as CSG operations often produce slicer-breaking non-manifold edges.
+- **Cost / Time Estimation:** Build a global utility that calculates the final merged mesh volume and factors in the global `infillPercentage` and `shellCount` parameters to accurately estimate filament weight (g) and print time before export, avoiding massive 3-5x overestimates on hollow/infilled parts.
 
 ## Leveraging Existing Code & External Repositories
 - **From internal:** Bring over the image quantization/palette code and manual raycast "Paint Tool" from `pixel-puzzle-maker_2`.
@@ -42,5 +47,5 @@ Establish a clean, scalable, and modular foundation for the Parametric LEGO Plat
 Since this phase may be executed in a fresh session, the AI agent must follow these explicit research steps BEFORE writing any geometry or UI code:
 1. **Clone `bhushan6/lego-builder`:** Use terminal tools to clone this repository to a scratch directory. Traverse the source code to see how they handle React-Three-Fiber grid snapping, camera controls, and state management. Pin to a specific commit hash for deterministic reference.
 2. **Analyze `cfinke/LEGO.scad`:** Fetch the raw `LEGO.scad` source file and pin the commit. **Read the actual code.** Specifically, find the mathematical formulas for the `block_bottom_type` and anti-stud tubes (the cylinders on the underside of a brick). Port these exact mathematical tolerances into our `Three.js` generator so our parts are snap-fit compatible with 3D printers.
-3. **Internal Review:** View `pixel-puzzle-maker_2`'s `generic-3mf-exporter.ts` to understand how the new baseplate's InstancedMesh data needs to be structured and merged for export.
+3. **Internal Review:** View `pixel-puzzle-maker_2`'s `generic-3mf-exporter.ts` to understand how the new baseplate's non-uniform instancing model needs to be structured and merged for export.
 4. **Tolerance Validation:** Implement a small validation script that verifies the exported geometry's `snapFit` dimensions match expected targets after compensation.
