@@ -25,7 +25,7 @@ Establish a clean, scalable, and modular foundation for the Parametric LEGO Plat
 ### 2. The Typed "Printer Tolerance" System
 - **Concept:** Every FDM printer extrudes slightly differently. LEGO requires micrometer precision to snap fit. Instead of a single global scalar, the tolerance system must be strongly typed (e.g., `snapFit`, `slidingFit`, `pressFit`, `clearanceFit`).
 - **Calibration Model:** The UI provides a primary calibration slider for `snapFit` (e.g., `-0.2mm` to `+0.2mm`). The other three tolerance types are derived from this base value via fixed engineering deltas, but the UI allows users to unlock and independently override them if needed.
-- *Math & Verification:* Standard LEGO stud diameter is `4.8mm`. We compensate for over-extrusion by shrinking studs and expanding holes. The sign convention must be explicitly verified with a real print test before baking it into the generators.
+- *Math & Verification:* Standard LEGO stud diameter is `4.8mm`. We compensate for over-extrusion by shrinking studs and expanding holes. The sign convention for `snapFit`, **as well as the engineering deltas for `pressFit`, `slidingFit`, and `clearanceFit`**, must be explicitly verified with real print tests before baking them into the generators.
 
 ### 3. Native Three.js Primitive Engine (The Baseplate)
 - Before touching OpenSCAD, we will build a pure JS parameterized Baseplate generator.
@@ -34,11 +34,11 @@ Establish a clean, scalable, and modular foundation for the Parametric LEGO Plat
 - **Features:** Sliders for `Width (studs)` and `Length (studs)`. Generates the precise 3D mesh instantly using this non-uniform instancing model for rendering and merging for export.
 
 ### 4. 3MF Export Integration & Geometry Validation
-- **Multi-Color & Export Pipeline:** Hook up the `generic-3mf-exporter.ts` from `pixel-puzzle-maker_2`. Verify and adapt the exporter so it supports the non-uniform instancing data structure, including passing through `materialProfile` metadata. For multi-color generators (like Phase 1 Mosaics), the exporter must offer two pipelines:
-  1. A single 3MF file with embedded per-instance color assignments (for users with AMS/MMU printers).
-  2. A `.zip` archive containing separate geometry files grouped by color (for single-extruder users to print batches manually).
+- **Export Pipeline:** Hook up the `generic-3mf-exporter.ts` from `pixel-puzzle-maker_2`. Verify and adapt the exporter so it supports the non-uniform instancing data structure, including passing through `materialProfile` metadata. *Note: True AMS/MMU single-file multi-color export is deferred to Phase 5.* For multi-color generators (like Phase 1 Mosaics), the exporter relies on two simple outputs:
+  1. A neutral-color 3MF for the baseplate/structural components.
+  2. A `.zip` archive containing separate geometry files grouped by color (for single-extruder users to print batches manually) alongside a BOM shopping list.
 - **Validation Script:** Create a testing script that loads the exported geometry and mathematically asserts the final dimensions (stud diameter, tube diameter, height) against expected values. Furthermore, check the topology to ensure the exported mesh is **watertight/manifold**, as CSG operations often produce slicer-breaking non-manifold edges.
-- **Cost / Time Estimation:** Build a global utility that calculates the final merged mesh volume and factors in the global `infillPercentage` and `shellCount` parameters to accurately estimate filament weight (g) and print time before export, avoiding massive 3-5x overestimates on hollow/infilled parts.
+- **Cost / Time Estimation:** Build a global utility that calculates the final merged mesh volume and factors in the global `infillPercentage` and `shellCount` parameters to accurately estimate filament weight (g) and print time before export, avoiding massive 3-5x overestimates on hollow/infilled parts. This utility must be pipeline-agnostic so it also covers Phase 3's WASM/STL outputs.
 
 ## Leveraging Existing Code & External Repositories
 - **From internal:** Bring over the image quantization/palette code and manual raycast "Paint Tool" from `pixel-puzzle-maker_2`.
