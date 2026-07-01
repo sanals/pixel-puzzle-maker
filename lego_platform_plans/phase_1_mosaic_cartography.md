@@ -13,6 +13,11 @@ Adapt the 2D pixel processing architecture from `pixel-puzzle-maker_2` and combi
   - **Stud Omission & Physical Assembly:** If a user hides a color in the palette, the engine skips generating those 1x1 plates, leaving the raw baseplate exposed. To physically assemble the mosaic, users have two valid options: 
     1. **Buy Real LEGO Pieces:** Use the generated BOM as a shopping list (color, qty) and snap official pieces onto the neutral baseplate (zero MMU dependency).
     2. **Print in Batches:** Export per-color geometry files (the zip pipeline), print one color at a time using a single extruder, and place them by hand.
+  - **Outputs:** 
+    - The actual 3D visualization.
+    - A step-by-step building guide for printing batches of colors and assembling the baseplate.
+    - A Bill of Materials (BOM) for users who just want to 3D print the baseplate and order real LEGO tiles for the pixels.
+  - **Color-Blind Accessibility:** Since this tool hinges on users visually distinguishing colors to pick real parts, the palette picker and BOM UI must include pattern/texture or text-label swatch identification (not color alone), plus a deuteranopia-simulation toggle for the mosaic preview so users can self-check their art before ordering parts.
   - **Mini-Map Engraving & Registration:** For massive posters (e.g., 96x96 studs), the engine slices the model into multiple 16x16 plates. It automatically engraves coordinates (A1, A2, B1) onto the back using a robust **text-to-geometry pipeline** (font loading -> 2D extrusion -> CSG subtraction). Additionally, the slicing algorithm will generate interlocking keyed edges (e.g., dovetails) or Technic pin holes on the plate borders utilizing the **`pressFit`** tolerance class to ensure adjacent plates snap together perfectly during physical assembly.
 
 ### 2. Topographic & Bathymetric Map Modeler
@@ -22,6 +27,7 @@ Adapt the 2D pixel processing architecture from `pixel-puzzle-maker_2` and combi
 - **Parametric Generation & Scaling:**
   - The script samples the image grid. Instead of color mapping, it maps 8-bit brightness (0-255) to *Height*.
   - *Quantization Logic:* Users define a "Max Height" (e.g., 20 plates). The 0-255 brightness range is linearly scaled and quantized to discrete plate heights (3.2mm increments).
+  - *Performance & Attribution:* Since DEMs cause non-uniform heights that break instancing reuse, large maps will easily exceed the 10k stud performance budget. Implement explicit **LOD (Level of Detail) / Chunking** strategies for the viewport. Additionally, clearly document and comply with attribution requirements for DEM source imagery (e.g., USGS, SRTM).
   - Generates a breathtaking 3D physical map that looks incredibly premium when side-lit.
 
 ### 3. Soundwave & Lithophane Generators

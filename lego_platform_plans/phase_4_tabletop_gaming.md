@@ -37,5 +37,5 @@ Target the massive tabletop gaming community (D&D, Warhammer, Board Games). We w
 
 ## Agent Execution Instructions for Phase 4
 When executing this phase, the AI agent must:
-1. **LDraw Format Conversion & Color Mapping:** `buildinginstructions.js` requires the `LDraw` format, whereas our pipeline generates Three.js BufferGeometry/InstancedMesh. As a prerequisite task, you must build or integrate a converter pipeline (Native Geometry -> LDraw) to feed the instruction generator. If parts are multi-colored, you must map our custom BrickLink-inspired palette back to LDraw's canonical numeric color-codes.
+1. **LDraw Format Conversion Mini-Project:** `buildinginstructions.js` requires the `LDraw` format, whereas our pipeline generates Three.js BufferGeometry/InstancedMesh. Building or integrating a converter pipeline (Native Geometry -> LDraw) is realistically **its own mini-project** and must be scoped with dedicated milestones. This involves geometry conversion, color-palette remapping (back to LDraw's canonical numeric codes), and adapting the stepping/parsing engine.
 2. **Clone `LasseD/buildinginstructions.js`:** Clone the repo and analyze the source code to understand how it parses LDraw formats and steps through the geometries to render interactive assembly instructions. Adapt this logic for our tabletop generated geometries.

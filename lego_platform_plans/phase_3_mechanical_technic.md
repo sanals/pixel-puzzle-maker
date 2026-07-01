@@ -34,5 +34,7 @@ Bridge the gap between static 3D printing and kinetic machinery (Section 3 of LE
 - **Implementation:** Sliders for tire diameter, width, and tread aggressiveness. Generates a monolithic wheel mesh featuring a standard Technic pin-hole hub for immediate compatibility.
 
 ## Agent Execution Instructions for Phase 3
-When executing this phase, the AI agent must:
-1. **Analyze `cfinke/Technic.scad`:** Clone the repository to a scratch directory, pin to a specific commit hash for deterministic reference, and analyze the raw `.scad` source code to understand how gear teeth involute math and pin holes are implemented.
+When executing this phase, the:
+- **Implementation Guidance:** Fetch `cfinke/Technic.scad` (and similar Repositories) as a reference point. Re-implement the mathematical gear involute formulas in JS/WASM.
+- **WASM GPL Architecture:** OpenSCAD is GPL-licensed. Compiling and shipping `openscad.wasm` as a running dependency is an architectural decision that must be handled defensively. Keep the WASM module explicitly sandboxed and invoked at arm's length (separate process boundary/Web Worker, absolutely no static linking) to preserve defensibility against GPL copyleft pollution into the core platform code.
+- **Cross-Axle Verification:** The single highest-risk geometry in the entire project is the standard cross-axle profile (a specific ⌀4.8mm cruciform shape, not round). Even fractional-mm errors cause binding in rotating assemblies. This profile must be explicitly called out and verified against **three independent sources** before baking the tolerance into the `clearanceFit` and `snapFit` axle mounts.
